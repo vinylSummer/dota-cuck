@@ -1,0 +1,14 @@
+version: v2
+plugins:
+  # --- Go (control plane) ---
+  # Local plugins (installed via `make proto-tools`). Avoids the BSR remote-plugin
+  # auth wall and keeps generation reproducible offline.
+  - local: protoc-gen-go
+    out: control-plane/gen
+    opt: paths=source_relative
+  - local: protoc-gen-go-grpc
+    out: control-plane/gen
+    opt: paths=source_relative
+
+# Python (worker) stubs are generated separately via grpc_tools.protoc — see the
+# Makefile `proto` target. grpcio-tools is already a worker runtime dependency.

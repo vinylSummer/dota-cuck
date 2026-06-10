@@ -1,0 +1,14 @@
+# Proto codegen tooling venv (bootstrap with `make proto-tools`)
+.venv/
+
+# Go
+control-plane/server
+*.test
+*.out
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Env / secrets
+.env

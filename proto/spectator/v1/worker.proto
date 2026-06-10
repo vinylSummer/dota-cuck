@@ -1,0 +1,70 @@
+syntax = "proto3";
+package spectator.v1;
+
+option go_package = "github.com/vinylSummer/dota-cuck/gen/spectator/v1";
+
+// === Service ===
+
+service ControlPlaneService {
+  // Worker opens this on startup. Control plane pushes Commands; worker pushes Events.
+  rpc WorkerSession(stream WorkerEvent) returns (stream Command);
+}
+
+// === Events: Worker → Control Plane ===
+
+message WorkerEvent {
+  string worker_id = 1;
+  oneof payload {
+    WorkerReady        ready             = 2;
+    StatusUpdate       status_update     = 3;
+    SteamGuardRequired steam_guard       = 4;
+    MatchIdResolved    match_id_resolved = 5;
+    StreamStarted      stream_started    = 6;
+    ErrorEvent         error             = 7;
+  }
+}
+
+message WorkerReady        {}
+message StatusUpdate       { WorkerState state = 1; }
+message SteamGuardRequired { SteamGuardType guard_type = 1; }
+message MatchIdResolved    { uint64 match_id = 1; string steam_id = 2; }
+message StreamStarted      { string srt_url = 1; }
+message ErrorEvent         { string code = 1; string message = 2; bool fatal = 3; }
+
+// === Commands: Control Plane → Worker ===
+
+message Command {
+  oneof payload {
+    StartSpectate        start_spectate  = 1;
+    StopSpectate         stop_spectate   = 2;
+    SubmitSteamGuardCode steam_guard     = 3;
+  }
+}
+
+message StartSpectate {
+  string session_id      = 1;
+  string target_steam_id = 2;       // friend's Steam ID to spectate
+  string steam_username   = 3;      // credentials decrypted in memory by control plane
+  string steam_password   = 4;
+  bytes  sentry_hash      = 5;      // device trust token if available; empty on first login
+}
+
+message StopSpectate         {}
+message SubmitSteamGuardCode { string code = 1; }
+
+// === Enums ===
+
+enum WorkerState {
+  WORKER_STATE_UNSPECIFIED = 0;
+  STOPPED    = 1;
+  STARTING   = 2;
+  IDLE       = 3;
+  SPECTATING = 4;
+  STOPPING   = 5;
+}
+
+enum SteamGuardType {
+  STEAM_GUARD_TYPE_UNSPECIFIED = 0;
+  EMAIL  = 1;
+  MOBILE = 2;
+}
