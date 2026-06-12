@@ -24,10 +24,6 @@ func testRouterWithToken(t *testing.T) (http.Handler, string) {
 // Routes for not-yet-built features must be registered (501 = handler reached,
 // not 404). Auth routes are implemented and covered in auth_test.go.
 func TestDocumentedRoutesReturn501(t *testing.T) {
-	// Public stub.
-	public := []struct{ method, path string }{
-		{http.MethodPost, "/api/auth/logout"},
-	}
 	// Authenticated stubs (require a token to reach the handler).
 	authed := []struct{ method, path string }{
 		{http.MethodGet, "/api/steam/accounts"},
@@ -40,22 +36,14 @@ func TestDocumentedRoutesReturn501(t *testing.T) {
 	}
 
 	router, token := testRouterWithToken(t)
-	check := func(method, path, auth string) {
-		req := httptest.NewRequest(method, path, nil)
-		if auth != "" {
-			req.Header.Set("Authorization", "Bearer "+auth)
-		}
+	for _, rt := range authed {
+		req := httptest.NewRequest(rt.method, rt.path, nil)
+		req.Header.Set("Authorization", "Bearer "+token)
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
 		if rec.Code != http.StatusNotImplemented {
-			t.Errorf("%s %s: status %d, want 501", method, path, rec.Code)
+			t.Errorf("%s %s: status %d, want 501", rt.method, rt.path, rec.Code)
 		}
-	}
-	for _, rt := range public {
-		check(rt.method, rt.path, "")
-	}
-	for _, rt := range authed {
-		check(rt.method, rt.path, token)
 	}
 }
 

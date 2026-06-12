@@ -56,6 +56,10 @@ func (s *Server) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Register auto-logs-in; cache the credential key so the user can link a
+	// Steam account without re-entering their password.
+	s.keys.Put(id, auth.DeriveKey(req.Password, salt))
+
 	s.issueToken(w, id, http.StatusCreated)
 }
 
@@ -92,7 +96,25 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Derive and cache the credential key while we still have the password.
+	s.keys.Put(user.ID, auth.DeriveKey(req.Password, user.KDFSalt))
+
 	s.issueToken(w, user.ID, http.StatusOK)
+}
+
+// Logout godoc
+// @Summary      Log out the current session
+// @Tags         auth
+// @Produce      json
+// @Security     BearerAuth
+// @Success      204
+// @Failure      401  {object}  ErrorResponse
+// @Router       /auth/logout [post]
+func (s *Server) Logout(w http.ResponseWriter, r *http.Request) {
+	if uid, ok := userID(r.Context()); ok {
+		s.keys.Delete(uid)
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // issueToken signs a JWT for userID and writes it as a LoginResponse.

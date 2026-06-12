@@ -36,6 +36,7 @@ func newTestServer(t *testing.T) (*Server, *store.Store) {
 		SteamAccounts: st.SteamAccounts,
 		Hasher:        hasher,
 		Tokens:        tokens,
+		Keys:          auth.NewKeyCache(time.Hour),
 	})
 	return srv, st
 }
@@ -140,6 +141,38 @@ func TestLoginUnknownUserIs401SameAsWrongPassword(t *testing.T) {
 	if wrongPass.Body.String() != noUser.Body.String() {
 		t.Fatalf("responses differ, enables user enumeration:\n wrong=%s\n nouser=%s",
 			wrongPass.Body, noUser.Body)
+	}
+}
+
+// Login caches the credential key; logout evicts it.
+func TestLoginCachesKeyAndLogoutEvicts(t *testing.T) {
+	srv, _ := newTestServer(t)
+	doJSON(t, srv.Router(), http.MethodPost, "/api/auth/register",
+		RegisterRequest{Username: "alice", Password: "hunter2"})
+
+	rec := doJSON(t, srv.Router(), http.MethodPost, "/api/auth/login",
+		LoginRequest{Username: "alice", Password: "hunter2"})
+	var resp LoginResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	uid, err := srv.tokens.Verify(resp.Token)
+	if err != nil {
+		t.Fatalf("verify token: %v", err)
+	}
+	if _, ok := srv.keys.Get(uid); !ok {
+		t.Fatal("login did not cache the credential key")
+	}
+
+	logout := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+	logout.Header.Set("Authorization", "Bearer "+resp.Token)
+	lrec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(lrec, logout)
+	if lrec.Code != http.StatusNoContent {
+		t.Fatalf("logout status = %d, want 204", lrec.Code)
+	}
+	if _, ok := srv.keys.Get(uid); ok {
+		t.Fatal("logout did not evict the cached key")
 	}
 }
 

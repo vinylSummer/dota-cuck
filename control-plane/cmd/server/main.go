@@ -61,16 +61,20 @@ func main() {
 	credentialPepper := mustEnv(log, "CREDENTIAL_PEPPER")
 	steamAPIKey := mustEnv(log, "STEAM_API_KEY")
 
+	const sessionTTL = 24 * time.Hour
+
 	hasher, err := auth.NewHasher([]byte(credentialPepper))
 	if err != nil {
 		log.Error("init password hasher", "err", err)
 		os.Exit(1)
 	}
-	tokens, err := auth.NewTokenManager([]byte(jwtSecret), 24*time.Hour)
+	tokens, err := auth.NewTokenManager([]byte(jwtSecret), sessionTTL)
 	if err != nil {
 		log.Error("init token manager", "err", err)
 		os.Exit(1)
 	}
+	// Credential keys live as long as the token they were minted for.
+	keys := auth.NewKeyCache(sessionTTL)
 
 	dbCtx, dbCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	db, err := store.New(dbCtx, databaseURL)
@@ -97,6 +101,7 @@ func main() {
 			Steam:         steamClient,
 			Hasher:        hasher,
 			Tokens:        tokens,
+			Keys:          keys,
 		}).Router(),
 	}
 

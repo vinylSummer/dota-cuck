@@ -50,6 +50,7 @@ func newFriendsFixture(t *testing.T, steamHandler http.Handler) *friendsFixture 
 		Steam:         steamClient,
 		Hasher:        hasher,
 		Tokens:        tokens,
+		Keys:          auth.NewKeyCache(time.Hour),
 	})
 	return &friendsFixture{srv: srv, store: st}
 }

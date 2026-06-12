@@ -2,23 +2,15 @@ package api
 
 import "net/http"
 
-// HTTP handlers. Those for features not yet built return 501 (friends: step 6,
-// steam/sessions: later steps). Auth (register/login) is implemented in
-// auth.go. The swaggo annotations above each handler are the source for the
+// HTTP handlers. Those for features not yet built return 501 (steam/sessions:
+// later steps). Auth (register/login/logout) is in auth.go; friends in
+// friends.go. The swaggo annotations above each handler are the source for the
 // generated OpenAPI spec.
 
 // notImplemented writes a 501 with an ErrorResponse-shaped body.
 func notImplemented(w http.ResponseWriter, _ *http.Request) {
 	http.Error(w, `{"error":"not implemented"}`, http.StatusNotImplemented)
 }
-
-// Logout godoc
-// @Summary      Log out the current session
-// @Tags         auth
-// @Produce      json
-// @Success      204
-// @Router       /auth/logout [post]
-func (s *Server) Logout(w http.ResponseWriter, r *http.Request) { notImplemented(w, r) }
 
 // ListSteamAccounts godoc
 // @Summary      List linked Steam accounts

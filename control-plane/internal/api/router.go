@@ -40,6 +40,7 @@ type Server struct {
 	steam         FriendsProvider
 	hasher        *auth.Hasher
 	tokens        *auth.TokenManager
+	keys          *auth.KeyCache
 }
 
 // Deps are the Server's collaborators. Grouped in a struct so the constructor
@@ -51,6 +52,7 @@ type Deps struct {
 	Steam         FriendsProvider
 	Hasher        *auth.Hasher
 	Tokens        *auth.TokenManager
+	Keys          *auth.KeyCache
 }
 
 func NewServer(d Deps) *Server {
@@ -61,6 +63,7 @@ func NewServer(d Deps) *Server {
 		steam:         d.Steam,
 		hasher:        d.Hasher,
 		tokens:        d.Tokens,
+		keys:          d.Keys,
 	}
 }
 
@@ -75,7 +78,8 @@ func (s *Server) Router() http.Handler {
 		r.Route("/auth", func(r chi.Router) {
 			r.Post("/register", s.Register)
 			r.Post("/login", s.Login)
-			r.Post("/logout", s.Logout)
+			// Logout is authenticated so it can evict the user's cached key.
+			r.With(s.requireAuth).Post("/logout", s.Logout)
 		})
 
 		// Authenticated routes.
