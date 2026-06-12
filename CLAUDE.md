@@ -248,7 +248,7 @@ Migrations in `control-plane/db/migrations/` using sequential numbered SQL files
 ```sql
 -- Users
 CREATE TABLE users (
-  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid_v7(),
+  id            UUID        PRIMARY KEY DEFAULT uuidv7(),
   username      TEXT        UNIQUE NOT NULL,
   password_hash TEXT        NOT NULL,        -- Argon2id
   created_at    TIMESTAMPTZ DEFAULT now()
@@ -256,7 +256,7 @@ CREATE TABLE users (
 
 -- Steam accounts linked to users (one per user in V1)
 CREATE TABLE steam_accounts (
-  id             UUID  PRIMARY KEY DEFAULT gen_random_uuid_v7(),
+  id             UUID  PRIMARY KEY DEFAULT uuidv7(),
   user_id        UUID  REFERENCES users(id) ON DELETE CASCADE,
   steam_id       TEXT  NOT NULL,
   steam_username TEXT  NOT NULL,
@@ -268,7 +268,7 @@ CREATE TABLE steam_accounts (
 
 -- Workers (V1: one row, inserted at startup)
 CREATE TABLE workers (
-  id         UUID PRIMARY KEY DEFAULT gen_random_uuid_v7(),
+  id         UUID PRIMARY KEY DEFAULT uuidv7(),
   state      TEXT NOT NULL DEFAULT 'STOPPED',
   last_seen  TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT now()
@@ -276,7 +276,7 @@ CREATE TABLE workers (
 
 -- Spectator sessions
 CREATE TABLE sessions (
-  id               UUID   PRIMARY KEY DEFAULT gen_random_uuid_v7(),
+  id               UUID   PRIMARY KEY DEFAULT uuidv7(),
   user_id          UUID   REFERENCES users(id),
   worker_id        UUID   REFERENCES workers(id),
   steam_account_id UUID   REFERENCES steam_accounts(id),
@@ -607,3 +607,52 @@ Dockerfile — it has large build time implications.
 10. Frontend — Login, Friends, Watch pages, SteamGuardModal, WebSocket integration
 11. Docker Compose — wire all services, GPU config, volume strategy
 12. nginx + TLS — final external deployment
+
+---
+
+## Testing
+
+**Philosophy:** test code that makes decisions; skip glue and stubs. A handler that returns
+`501`, or a Steam/Dota/FFmpeg call with no logic yet, has nothing to assert — adding tests there
+tests the framework, not us. Introduce tests for each piece *when that piece gains real behaviour*,
+not before. State machines, request routing, serialization contracts, and crypto are the things
+worth covering.
+
+`make test` runs `go test ./...` (control plane) and `pytest` (worker).
+
+**Design constraint:** the session and worker state machines must be **pure transition functions /
+tables** (e.g. `Next(cur, event) (next, error)`), not logic buried inside handlers. This is the
+right shape regardless and is what makes them testable.
+
+### Tests for the steps 2–4 skeleton
+
+Control plane (Go, stdlib `testing`, table-driven):
+- **Session state machine** (`internal/sessions`): every valid edge advances
+  (`OFF→STARTING→WATCHING→STOPPING→OFF`); invalid edges error; a fatal-error event from any active
+  state routes to `STOPPING`.
+- **HTTP router contract** (`internal/api`, `httptest`): every documented route is registered and
+  returns `501`; unknown paths return `404`. Locks the API surface.
+- **WebSocket push-event marshaling** (`internal/api`): the four events (`session_state`,
+  `steam_guard`, `stream_ready`, `error`) marshal to exactly the JSON shape in the spec — the
+  frontend depends on these field names.
+- **gRPC `WorkerSession` handler** (`internal/workers`): in-memory bidi stream — worker connects,
+  sends `WorkerReady`, is registered and state updates; a pushed `Command` reaches the stream.
+
+Worker (Python, `pytest`):
+- **Worker state machine**: parametrized valid/invalid transitions
+  (`STOPPED→STARTING→IDLE→SPECTATING→STOPPING`).
+- **Command dispatch** (`grpc_client.py`): each `Command` oneof variant routes to the correct
+  (mocked) handler.
+
+Deferred: DB migrations (apply-against-Postgres is integration, not unit). Auth/crypto tests land
+with **step 5** — Argon2id and AES-256-GCM are the most important tests in the project.
+
+---
+
+## Commit Discipline
+
+Prefer small, single-purpose commits, each independently revertable. Don't bundle unrelated
+changes into one commit. Typical granularity for the skeleton milestone: migrations as one commit;
+control-plane skeleton as another; worker skeleton as another; tests committed alongside the code
+they cover (or as a focused follow-up). A reader should be able to `git revert` any single commit
+without untangling others.
