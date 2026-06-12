@@ -22,6 +22,7 @@ import (
 	pb "github.com/vinylSummer/dota-cuck/gen/spectator/v1"
 	"github.com/vinylSummer/dota-cuck/internal/api"
 	"github.com/vinylSummer/dota-cuck/internal/auth"
+	"github.com/vinylSummer/dota-cuck/internal/steam"
 	"github.com/vinylSummer/dota-cuck/internal/store"
 	"github.com/vinylSummer/dota-cuck/internal/workers"
 	"google.golang.org/grpc"
@@ -58,6 +59,7 @@ func main() {
 	databaseURL := mustEnv(log, "DATABASE_URL")
 	jwtSecret := mustEnv(log, "JWT_SECRET")
 	credentialPepper := mustEnv(log, "CREDENTIAL_PEPPER")
+	steamAPIKey := mustEnv(log, "STEAM_API_KEY")
 
 	hasher, err := auth.NewHasher([]byte(credentialPepper))
 	if err != nil {
@@ -83,14 +85,18 @@ func main() {
 	grpcServer := grpc.NewServer()
 	pb.RegisterControlPlaneServiceServer(grpcServer, workers.NewServer(reg, log))
 
+	steamClient := steam.NewClient(steamAPIKey)
+
 	hub := api.NewHub(log)
 	httpServer := &http.Server{
 		Addr: httpAddr,
 		Handler: api.NewServer(api.Deps{
-			Hub:    hub,
-			Users:  db.Users,
-			Hasher: hasher,
-			Tokens: tokens,
+			Hub:           hub,
+			Users:         db.Users,
+			SteamAccounts: db.SteamAccounts,
+			Steam:         steamClient,
+			Hasher:        hasher,
+			Tokens:        tokens,
 		}).Router(),
 	}
 

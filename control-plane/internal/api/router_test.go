@@ -33,7 +33,6 @@ func TestDocumentedRoutesReturn501(t *testing.T) {
 		{http.MethodGet, "/api/steam/accounts"},
 		{http.MethodPost, "/api/steam/accounts"},
 		{http.MethodDelete, "/api/steam/accounts/abc"},
-		{http.MethodGet, "/api/friends"},
 		{http.MethodPost, "/api/sessions"},
 		{http.MethodGet, "/api/sessions/abc"},
 		{http.MethodDelete, "/api/sessions/abc"},

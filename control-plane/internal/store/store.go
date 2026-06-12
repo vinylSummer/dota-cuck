@@ -13,8 +13,9 @@ import (
 
 // Store holds the connection pool and the table stores built on it.
 type Store struct {
-	pool  *pgxpool.Pool
-	Users *UserStore
+	pool          *pgxpool.Pool
+	Users         *UserStore
+	SteamAccounts *SteamAccountStore
 }
 
 // New opens a pgx pool against databaseURL and verifies connectivity with a
@@ -28,7 +29,11 @@ func New(ctx context.Context, databaseURL string) (*Store, error) {
 		pool.Close()
 		return nil, fmt.Errorf("store: ping: %w", err)
 	}
-	return &Store{pool: pool, Users: &UserStore{pool: pool}}, nil
+	return &Store{
+		pool:          pool,
+		Users:         &UserStore{pool: pool},
+		SteamAccounts: &SteamAccountStore{pool: pool},
+	}, nil
 }
 
 // Close releases the pool's connections.

@@ -9,38 +9,59 @@ import (
 	httpSwagger "github.com/swaggo/http-swagger/v2"
 
 	"github.com/vinylSummer/dota-cuck/internal/auth"
+	"github.com/vinylSummer/dota-cuck/internal/steam"
 	"github.com/vinylSummer/dota-cuck/internal/store"
 )
 
-// UserStore is the slice of persistence the auth handlers need. The concrete
-// implementation is *store.UserStore; the interface keeps handlers testable
-// with a fake and free of a database dependency.
+// UserStore is the slice of user persistence the auth handlers need.
 type UserStore interface {
 	Create(ctx context.Context, username, passwordHash string, kdfSalt []byte) (string, error)
 	GetByUsername(ctx context.Context, username string) (*store.User, error)
 }
 
+// SteamAccountStore is the slice of steam-account persistence the handlers need.
+type SteamAccountStore interface {
+	GetByUserID(ctx context.Context, userID string) (*store.SteamAccount, error)
+}
+
+// FriendsProvider fetches a Steam account's friends with live status. The
+// concrete implementation is *steam.Client.
+type FriendsProvider interface {
+	Friends(ctx context.Context, steamID string) ([]steam.Friend, error)
+}
+
 // Server holds the HTTP handler dependencies. Handlers for features not yet
-// built (steam, friends, sessions) are still 501 stubs; the route surface is
+// built (steam linking, sessions) are still 501 stubs; the route surface is
 // wired so the API shape is locked, documented, and testable.
 type Server struct {
-	hub    *Hub
-	users  UserStore
-	hasher *auth.Hasher
-	tokens *auth.TokenManager
+	hub           *Hub
+	users         UserStore
+	steamAccounts SteamAccountStore
+	steam         FriendsProvider
+	hasher        *auth.Hasher
+	tokens        *auth.TokenManager
 }
 
 // Deps are the Server's collaborators. Grouped in a struct so the constructor
 // signature stays stable as more are added.
 type Deps struct {
-	Hub    *Hub
-	Users  UserStore
-	Hasher *auth.Hasher
-	Tokens *auth.TokenManager
+	Hub           *Hub
+	Users         UserStore
+	SteamAccounts SteamAccountStore
+	Steam         FriendsProvider
+	Hasher        *auth.Hasher
+	Tokens        *auth.TokenManager
 }
 
 func NewServer(d Deps) *Server {
-	return &Server{hub: d.Hub, users: d.Users, hasher: d.Hasher, tokens: d.Tokens}
+	return &Server{
+		hub:           d.Hub,
+		users:         d.Users,
+		steamAccounts: d.SteamAccounts,
+		steam:         d.Steam,
+		hasher:        d.Hasher,
+		tokens:        d.Tokens,
+	}
 }
 
 // Router builds the Chi mux with every route from the HTTP API spec, plus the

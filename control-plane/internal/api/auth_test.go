@@ -30,7 +30,13 @@ func newTestServer(t *testing.T) (*Server, *store.Store) {
 		t.Fatalf("NewTokenManager: %v", err)
 	}
 	hub := NewHub(slog.New(slog.NewTextHandler(io.Discard, nil)))
-	srv := NewServer(Deps{Hub: hub, Users: st.Users, Hasher: hasher, Tokens: tokens})
+	srv := NewServer(Deps{
+		Hub:           hub,
+		Users:         st.Users,
+		SteamAccounts: st.SteamAccounts,
+		Hasher:        hasher,
+		Tokens:        tokens,
+	})
 	return srv, st
 }
 

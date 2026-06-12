@@ -51,14 +51,7 @@ func (s *Server) AddSteamAccount(w http.ResponseWriter, r *http.Request) { notIm
 // @Router       /steam/accounts/{id} [delete]
 func (s *Server) DeleteSteamAccount(w http.ResponseWriter, r *http.Request) { notImplemented(w, r) }
 
-// ListFriends godoc
-// @Summary      List Steam friends with online and in-match status
-// @Tags         friends
-// @Produce      json
-// @Success      200  {array}   Friend
-// @Failure      401  {object}  ErrorResponse
-// @Router       /friends [get]
-func (s *Server) ListFriends(w http.ResponseWriter, r *http.Request) { notImplemented(w, r) }
+// ListFriends is implemented in friends.go.
 
 // CreateSession godoc
 // @Summary      Start spectating a friend

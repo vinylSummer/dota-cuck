@@ -139,6 +139,18 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/api.ErrorResponse"
                         }
+                    },
+                    "409": {
+                        "description": "no steam account linked",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "steam api error",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
                     }
                 }
             }
