@@ -1,7 +1,8 @@
 GOBIN   := $(shell go env GOPATH)/bin
 BUF     ?= $(GOBIN)/buf
-VENV    ?= .venv
-PY      := $(VENV)/bin/python
+UV      ?= uv
+# Worker Python runs via uv (Python 3.10 + protobuf-3.20 line, fetched by uv).
+UVRUN   := $(UV) run --project worker
 
 SWAG    ?= $(GOBIN)/swag
 
@@ -15,34 +16,32 @@ test: test-go test-py
 test-go:
 	scripts/with-test-db.sh sh -c 'cd control-plane && go test ./...'
 
-# Uses the worker venv; create it with: python3 -m venv worker/.venv && \
-#   worker/.venv/bin/pip install -r worker/requirements-dev.txt
+# uv fetches Python 3.10 and syncs worker deps on first run.
 test-py:
-	cd worker && .venv/bin/python -m pytest -q
+	cd worker && $(UV) run pytest -q
 
-# Regenerate Go + Python stubs from proto/. Idempotent.
+# Regenerate Go + Python stubs from proto/. Idempotent. grpcio-tools 1.48.x
+# emits protobuf-3 gencode (no --pyi_out plugin in that line).
 proto:
 	$(BUF) generate proto
 	@mkdir -p worker/gen
-	$(PY) -m grpc_tools.protoc \
+	$(UVRUN) python -m grpc_tools.protoc \
 		-Iproto \
 		--python_out=worker/gen \
-		--pyi_out=worker/gen \
 		--grpc_python_out=worker/gen \
 		proto/spectator/v1/worker.proto
 	@# Make the Python generated tree an importable package.
 	@find worker/gen -type d -exec touch {}/__init__.py \;
 	@echo "proto: generated control-plane/gen and worker/gen"
 
-# One-time bootstrap of the codegen toolchain (buf, Go plugins, Python venv).
+# One-time bootstrap of the Go codegen toolchain. The worker's Python toolchain
+# (grpcio-tools, Python 3.10) is provisioned by uv via `uv sync` / `uv run`.
 proto-tools:
 	go install github.com/bufbuild/buf/cmd/buf@v1.50.0
 	go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.1
 	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
 	go install github.com/swaggo/swag/cmd/swag@v1.16.4
-	python3 -m venv $(VENV)
-	$(VENV)/bin/pip install --upgrade pip
-	$(VENV)/bin/pip install grpcio-tools==1.81.0
+	$(UV) sync --project worker
 
 # Regenerate the OpenAPI spec (control-plane/docs/) from swaggo annotations.
 # Run after changing handler annotations or the DTOs in internal/api. The

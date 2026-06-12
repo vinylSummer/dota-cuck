@@ -1,0 +1,27 @@
+[project]
+name = "dota-spectator-worker"
+version = "0.1.0"
+description = "Dota 2 spectator worker: gRPC client, Steam/GC, Dota automation, FFmpeg."
+# python-steam pins protobuf~=3.0, so the whole worker lives on the protobuf-3.20
+# line. grpcio(-tools) 1.48.x is the last release that emits protobuf-3 gencode
+# and ships wheels for cp310 — hence Python 3.10. uv fetches the interpreter, so
+# no system Python 3.10 is required.
+requires-python = ">=3.10,<3.11"
+dependencies = [
+    "grpcio==1.48.2",
+    "protobuf==3.20.3",
+    "steam[client]==1.4.4",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==8.3.4",
+    "grpcio-tools==1.48.2",  # codegen; must match the runtime protobuf-3 line
+    "setuptools<81",         # grpc_tools.protoc imports pkg_resources (dropped in setuptools 81+)
+]
+
+[tool.pytest.ini_options]
+# Generated stubs import each other as `from spectator.v1 import ...`, so the
+# gen/ tree is its own import root.
+pythonpath = [".", "gen"]
+testpaths = ["tests"]

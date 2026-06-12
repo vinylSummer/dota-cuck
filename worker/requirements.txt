@@ -1,8 +1,0 @@
-# gRPC + protobuf runtime. grpcio-tools (codegen) is pinned in the Makefile's
-# proto-tools target; grpcio/protobuf below are the runtime deps.
-grpcio==1.81.0
-protobuf==6.33.5  # must match the gencode major version of worker_pb2.py
-
-# Steam / Game Coordinator deps (python-steam, python-dota2) are added in
-# step 7, once their protobuf version constraints are reconciled against the
-# generated stubs above and validated on-server. Not needed by the skeleton.

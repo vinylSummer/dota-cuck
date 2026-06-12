@@ -44,11 +44,13 @@ class CommandDispatcher:
         on_start_spectate: Callable[[pb.StartSpectate], None],
         on_stop_spectate: Callable[[pb.StopSpectate], None],
         on_steam_guard: Callable[[pb.SubmitSteamGuardCode], None],
+        on_list_friends: Callable[[pb.ListFriends], None],
     ) -> None:
         self._handlers = {
             "start_spectate": (on_start_spectate, lambda c: c.start_spectate),
             "stop_spectate": (on_stop_spectate, lambda c: c.stop_spectate),
             "steam_guard": (on_steam_guard, lambda c: c.steam_guard),
+            "list_friends": (on_list_friends, lambda c: c.list_friends),
         }
 
     def dispatch(self, command: pb.Command) -> None:

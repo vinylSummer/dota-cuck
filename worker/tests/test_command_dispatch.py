@@ -11,11 +11,13 @@ def make_dispatcher():
         "start": Mock(),
         "stop": Mock(),
         "guard": Mock(),
+        "friends": Mock(),
     }
     dispatcher = CommandDispatcher(
         on_start_spectate=handlers["start"],
         on_stop_spectate=handlers["stop"],
         on_steam_guard=handlers["guard"],
+        on_list_friends=handlers["friends"],
     )
     return dispatcher, handlers
 
@@ -43,6 +45,13 @@ def test_steam_guard_routes_with_code():
     dispatcher.dispatch(pb.Command(steam_guard=pb.SubmitSteamGuardCode(code="ABCDE")))
     handlers["guard"].assert_called_once()
     assert handlers["guard"].call_args.args[0].code == "ABCDE"
+
+
+def test_list_friends_routes_with_request_id():
+    dispatcher, handlers = make_dispatcher()
+    dispatcher.dispatch(pb.Command(list_friends=pb.ListFriends(request_id="req-1", steam_username="u")))
+    handlers["friends"].assert_called_once()
+    assert handlers["friends"].call_args.args[0].request_id == "req-1"
 
 
 def test_empty_command_is_unknown():
