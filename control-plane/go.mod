@@ -4,6 +4,7 @@ go 1.26
 
 require (
 	github.com/go-chi/chi/v5 v5.2.0
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/swaggo/http-swagger/v2 v2.0.2
 	github.com/swaggo/swag v1.16.4
 	golang.org/x/crypto v0.53.0
