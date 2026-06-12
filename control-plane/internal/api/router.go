@@ -21,7 +21,9 @@ type UserStore interface {
 
 // SteamAccountStore is the slice of steam-account persistence the handlers need.
 type SteamAccountStore interface {
+	Create(ctx context.Context, userID, steamUsername string, encPassword, encNonce []byte) (string, error)
 	GetByUserID(ctx context.Context, userID string) (*store.SteamAccount, error)
+	Delete(ctx context.Context, userID, id string) error
 }
 
 // FriendsProvider fetches a Steam account's friends with live status. The

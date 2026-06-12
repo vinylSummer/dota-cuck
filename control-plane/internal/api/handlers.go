@@ -2,48 +2,15 @@ package api
 
 import "net/http"
 
-// HTTP handlers. Those for features not yet built return 501 (steam/sessions:
-// later steps). Auth (register/login/logout) is in auth.go; friends in
-// friends.go. The swaggo annotations above each handler are the source for the
-// generated OpenAPI spec.
+// HTTP handlers. Those for features not yet built return 501 (sessions: later
+// steps). Auth (register/login/logout) is in auth.go; friends in friends.go;
+// steam account management in steam_accounts.go. The swaggo annotations above
+// each handler are the source for the generated OpenAPI spec.
 
 // notImplemented writes a 501 with an ErrorResponse-shaped body.
 func notImplemented(w http.ResponseWriter, _ *http.Request) {
 	http.Error(w, `{"error":"not implemented"}`, http.StatusNotImplemented)
 }
-
-// ListSteamAccounts godoc
-// @Summary      List linked Steam accounts
-// @Tags         steam
-// @Produce      json
-// @Success      200  {array}   SteamAccount
-// @Failure      401  {object}  ErrorResponse
-// @Router       /steam/accounts [get]
-func (s *Server) ListSteamAccounts(w http.ResponseWriter, r *http.Request) { notImplemented(w, r) }
-
-// AddSteamAccount godoc
-// @Summary      Link a Steam account
-// @Tags         steam
-// @Accept       json
-// @Produce      json
-// @Param        body  body      SteamAccountRequest  true  "steam credentials"
-// @Success      201   {object}  SteamAccount
-// @Failure      400   {object}  ErrorResponse
-// @Failure      401   {object}  ErrorResponse
-// @Router       /steam/accounts [post]
-func (s *Server) AddSteamAccount(w http.ResponseWriter, r *http.Request) { notImplemented(w, r) }
-
-// DeleteSteamAccount godoc
-// @Summary      Remove a linked Steam account
-// @Tags         steam
-// @Produce      json
-// @Param        id   path      string  true  "steam account id"
-// @Success      204
-// @Failure      404  {object}  ErrorResponse
-// @Router       /steam/accounts/{id} [delete]
-func (s *Server) DeleteSteamAccount(w http.ResponseWriter, r *http.Request) { notImplemented(w, r) }
-
-// ListFriends is implemented in friends.go.
 
 // CreateSession godoc
 // @Summary      Start spectating a friend

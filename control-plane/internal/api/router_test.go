@@ -26,9 +26,6 @@ func testRouterWithToken(t *testing.T) (http.Handler, string) {
 func TestDocumentedRoutesReturn501(t *testing.T) {
 	// Authenticated stubs (require a token to reach the handler).
 	authed := []struct{ method, path string }{
-		{http.MethodGet, "/api/steam/accounts"},
-		{http.MethodPost, "/api/steam/accounts"},
-		{http.MethodDelete, "/api/steam/accounts/abc"},
 		{http.MethodPost, "/api/sessions"},
 		{http.MethodGet, "/api/sessions/abc"},
 		{http.MethodDelete, "/api/sessions/abc"},

@@ -64,8 +64,14 @@ func (f *friendsFixture) seedUserWithSteam(t *testing.T, steamID string) string 
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	if _, err := f.store.SteamAccounts.Create(ctx, uid, steamID, "alice_dota", []byte("ct"), []byte("nonce")); err != nil {
+	accID, err := f.store.SteamAccounts.Create(ctx, uid, "alice_dota", []byte("ct"), []byte("nonce"))
+	if err != nil {
 		t.Fatalf("create steam account: %v", err)
+	}
+	if steamID != "" {
+		if err := f.store.SteamAccounts.SetSteamID(ctx, accID, steamID); err != nil {
+			t.Fatalf("set steam id: %v", err)
+		}
 	}
 	token, err := f.srv.tokens.Issue(uid)
 	if err != nil {
