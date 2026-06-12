@@ -17,12 +17,18 @@ import (
 	"syscall"
 	"time"
 
+	_ "github.com/vinylSummer/dota-cuck/docs" // generated OpenAPI spec (swag init)
 	pb "github.com/vinylSummer/dota-cuck/gen/spectator/v1"
 	"github.com/vinylSummer/dota-cuck/internal/api"
 	"github.com/vinylSummer/dota-cuck/internal/workers"
 	"google.golang.org/grpc"
 )
 
+// @title        Dota Spectator Control Plane API
+// @version      1.0
+// @description  Self-hosted service to spectate live Dota 2 matches of Steam friends.
+// @description  All handlers are skeleton stubs (501) until their feature steps land.
+// @BasePath     /api
 func env(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v

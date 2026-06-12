@@ -239,6 +239,19 @@ WS     /ws                                    push event stream
 { "type": "error",          "session_id": "...", "code": "DOTA_CRASH", "message": "..." }
 ```
 
+### OpenAPI / Swagger documentation
+
+The HTTP API is documented with **swaggo** (code-first). Each handler in
+`control-plane/internal/api/handlers.go` carries `// @...` annotations; request
+and response shapes are the DTO structs in `internal/api/models.go`. General
+API info lives above `main()` in `cmd/server/main.go`.
+
+- Regenerate after changing annotations or DTOs: `make docs` (runs `swag init`
+  → `control-plane/docs/`). The generated `docs/` package is **committed** so
+  the binary builds without the swag CLI; `main.go` blank-imports it.
+- Served at **`/docs`** (Swagger UI); raw spec at `/docs/doc.json`.
+- swaggo emits Swagger 2.0; the spec's `basePath` is `/api`.
+
 ---
 
 ## Database Schema
@@ -474,6 +487,7 @@ GPU rendering. The BusID must match the host PCI address (find with `nvidia-smi`
 │   │   └── api/             HTTP handlers (Chi), WebSocket hub
 │   ├── db/
 │   │   └── migrations/      001_init.sql, etc.
+│   ├── docs/                Generated OpenAPI spec (swag init; do not edit)
 │   ├── gen/                 Generated protobuf Go code (do not edit)
 │   └── Dockerfile
 │

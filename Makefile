@@ -3,7 +3,9 @@ BUF     ?= $(GOBIN)/buf
 VENV    ?= .venv
 PY      := $(VENV)/bin/python
 
-.PHONY: proto proto-tools proto-lint proto-clean test test-go test-py
+SWAG    ?= $(GOBIN)/swag
+
+.PHONY: proto proto-tools proto-lint proto-clean test test-go test-py docs
 
 # Run all unit tests (control plane + worker).
 test: test-go test-py
@@ -35,9 +37,16 @@ proto-tools:
 	go install github.com/bufbuild/buf/cmd/buf@v1.50.0
 	go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.1
 	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
+	go install github.com/swaggo/swag/cmd/swag@v1.16.4
 	python3 -m venv $(VENV)
 	$(VENV)/bin/pip install --upgrade pip
 	$(VENV)/bin/pip install grpcio-tools==1.81.0
+
+# Regenerate the OpenAPI spec (control-plane/docs/) from swaggo annotations.
+# Run after changing handler annotations or the DTOs in internal/api. The
+# generated docs/ package is committed so the binary builds without swag.
+docs:
+	cd control-plane && $(SWAG) init -g cmd/server/main.go -d ./ -o ./docs --parseInternal
 
 proto-lint:
 	$(BUF) lint proto
