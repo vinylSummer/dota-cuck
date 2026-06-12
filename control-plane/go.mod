@@ -3,8 +3,10 @@ module github.com/vinylSummer/dota-cuck
 go 1.26
 
 require (
+	github.com/go-chi/chi/v5 v5.2.0
 	google.golang.org/grpc v1.69.2
 	google.golang.org/protobuf v1.36.1
+	nhooyr.io/websocket v1.8.17
 )
 
 require (

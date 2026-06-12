@@ -3,7 +3,18 @@ BUF     ?= $(GOBIN)/buf
 VENV    ?= .venv
 PY      := $(VENV)/bin/python
 
-.PHONY: proto proto-tools proto-lint proto-clean
+.PHONY: proto proto-tools proto-lint proto-clean test test-go test-py
+
+# Run all unit tests (control plane + worker).
+test: test-go test-py
+
+test-go:
+	cd control-plane && go test ./...
+
+# Uses the worker venv; create it with: python3 -m venv worker/.venv && \
+#   worker/.venv/bin/pip install -r worker/requirements-dev.txt
+test-py:
+	cd worker && .venv/bin/python -m pytest -q
 
 # Regenerate Go + Python stubs from proto/. Idempotent.
 proto:
