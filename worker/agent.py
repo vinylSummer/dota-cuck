@@ -43,6 +43,18 @@ _FRIENDS_ERROR_CODE = {
     LoginError: "LOGIN_FAILED",
 }
 
+# Maps a Steam exception type to the LinkResult error code. The interactive guard
+# is driven via a callback, so SteamGuardRequired is not expected on this path.
+_LINK_ERROR_CODE = {
+    LoginError: "LOGIN_FAILED",
+}
+
+# Maps the SteamSession guard_type string to the proto enum.
+_GUARD_TYPE = {
+    "EMAIL": pb.EMAIL,
+    "MOBILE": pb.MOBILE,
+}
+
 
 def friends_ok_event(request_id: str, owner_steam_id: str, friends: list[dict]) -> pb.WorkerEvent:
     """Build a successful FriendsResult event from the session's (owner, friends)
@@ -76,6 +88,34 @@ def friends_error_event(request_id: str, exc: Exception) -> pb.WorkerEvent:
     )
 
 
+def link_ok_event(request_id: str, owner_steam_id: str) -> pb.WorkerEvent:
+    """Build a successful LinkResult event reporting the account's Steam ID."""
+    return pb.WorkerEvent(
+        link_result=pb.LinkResult(request_id=request_id, owner_steam_id=owner_steam_id)
+    )
+
+
+def link_error_event(request_id: str, exc: Exception) -> pb.WorkerEvent:
+    """Build a failed LinkResult event. Unknown failures fall back to STEAM_ERROR."""
+    code = _LINK_ERROR_CODE.get(type(exc), "STEAM_ERROR")
+    return pb.WorkerEvent(
+        link_result=pb.LinkResult(
+            request_id=request_id,
+            error=pb.ErrorEvent(code=code, message=str(exc), fatal=False),
+        )
+    )
+
+
+def steam_guard_event(request_id: str, guard_type: str) -> pb.WorkerEvent:
+    """Build a SteamGuardRequired event correlated to its login request."""
+    return pb.WorkerEvent(
+        steam_guard=pb.SteamGuardRequired(
+            request_id=request_id,
+            guard_type=_GUARD_TYPE.get(guard_type, pb.STEAM_GUARD_TYPE_UNSPECIFIED),
+        )
+    )
+
+
 class Agent:
     def __init__(self, address: str, worker_id: str, steam_session: SteamSession | None = None) -> None:
         self.state = sm.State.STOPPED
@@ -85,6 +125,7 @@ class Agent:
             on_stop_spectate=self._on_stop_spectate,
             on_steam_guard=self._on_steam_guard,
             on_list_friends=self._on_list_friends,
+            on_link_account=self._on_link_account,
         )
         self._client = GrpcClient(address, worker_id, dispatcher)
 
@@ -110,6 +151,30 @@ class Agent:
 
     def _on_steam_guard(self, cmd: pb.SubmitSteamGuardCode) -> None:
         log.info("SubmitSteamGuardCode: code=%s", "*" * len(cmd.code))
+        # V1 has a single in-flight login, so the code routes to the one session
+        # awaiting it; the command's request_id is carried for forward compat.
+        self._steam.submit_guard_code(cmd.code)
+
+    def _on_link_account(self, cmd: pb.LinkAccount) -> None:
+        # Run off the command-stream thread: the login can block on an
+        # interactive Steam Guard prompt without stalling other commands.
+        threading.Thread(target=self._link_account, args=(cmd,), daemon=True).start()
+
+    def _link_account(self, cmd: pb.LinkAccount) -> None:
+        log.info("LinkAccount: request=%s user=%s", cmd.request_id, cmd.steam_username)
+
+        def on_guard(guard_type: str) -> None:
+            log.info("LinkAccount: steam guard required (%s)", guard_type)
+            self._client.send(steam_guard_event(cmd.request_id, guard_type))
+
+        try:
+            owner = self._steam.link(cmd.steam_username, cmd.steam_password, on_guard=on_guard)
+        except Exception as exc:  # noqa: BLE001 — any Steam/runtime failure becomes an error event
+            log.warning("LinkAccount failed: %s", exc)
+            event = link_error_event(cmd.request_id, exc)
+        else:
+            event = link_ok_event(cmd.request_id, owner)
+        self._client.send(event)
 
     def _on_list_friends(self, cmd: pb.ListFriends) -> None:
         # Run off the command-stream thread so a slow Steam reply doesn't block

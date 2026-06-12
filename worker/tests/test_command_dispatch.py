@@ -12,12 +12,14 @@ def make_dispatcher():
         "stop": Mock(),
         "guard": Mock(),
         "friends": Mock(),
+        "link": Mock(),
     }
     dispatcher = CommandDispatcher(
         on_start_spectate=handlers["start"],
         on_stop_spectate=handlers["stop"],
         on_steam_guard=handlers["guard"],
         on_list_friends=handlers["friends"],
+        on_link_account=handlers["link"],
     )
     return dispatcher, handlers
 
@@ -52,6 +54,13 @@ def test_list_friends_routes_with_request_id():
     dispatcher.dispatch(pb.Command(list_friends=pb.ListFriends(request_id="req-1", steam_username="u")))
     handlers["friends"].assert_called_once()
     assert handlers["friends"].call_args.args[0].request_id == "req-1"
+
+
+def test_link_account_routes_with_request_id():
+    dispatcher, handlers = make_dispatcher()
+    dispatcher.dispatch(pb.Command(link_account=pb.LinkAccount(request_id="req-2", steam_username="u")))
+    handlers["link"].assert_called_once()
+    assert handlers["link"].call_args.args[0].request_id == "req-2"
 
 
 def test_empty_command_is_unknown():

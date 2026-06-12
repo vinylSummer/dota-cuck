@@ -22,11 +22,18 @@ and `make proto` invoke `uv run`. Pins: `protobuf==3.20.3`, `grpcio==1.48.2`,
 ## Responsibilities
 
 - Steam login: python-steam for GC queries + friends; GUI Steam for Dota automation. Set
-  `set_credential_location` so sentries persist; capture the `login_key` (`new_login_key` event)
-  for password-less `relogin()` on later logins.
+  `set_credential_location` so the **sentry** persists (Steam Guard device trust). **Sentry only —
+  the `login_key` is never persisted** (`new_login_key` is not handled): the login_key is a full
+  relogin secret, so cold logins re-send the password and rely on the sentry to skip the guard.
+- **Account link** (`LinkAccount` command → `LinkResult` event): a standalone login that
+  establishes the sentry and reports the account's `steam_id`. It drives the interactive Steam
+  Guard flow — `SteamSession.link` pauses on a guard challenge, the agent emits
+  `SteamGuardRequired` (correlated by `request_id`), and the worker resumes once
+  `SubmitSteamGuardCode` delivers a code (`submit_guard_code`). Resolving the guard here means
+  later friends/spectate logins reuse the sentry and don't re-prompt.
 - **Warm friends session** (`steam_client.SteamSession`): one in-process python-steam session,
-  lazily connected on the first `ListFriends`, kept alive between calls (relogin via `login_key`).
-  Lists the logged-in account's friends with online + in-match status (`ListFriends` command →
+  lazily connected on the first `ListFriends`, kept alive (logged on) between calls. Lists the
+  logged-in account's friends with online + in-match status (`ListFriends` command →
   `FriendsResult` event) and reports its own `steam_id` so the control plane can backfill
   `steam_accounts.steam_id`. **Dropped while spectating** (GUI Steam needs the account — see the
   dual-session risk in [known-risks.md](known-risks.md)) and re-warmed lazily afterwards. The
@@ -46,10 +53,10 @@ and `make proto` invoke `uv run`. Pins: `protobuf==3.20.3`, `grpcio==1.48.2`,
 
 | File | Role |
 |------|------|
-| `agent.py` | Entry point, state-machine driver, command handlers, FriendsResult mapping |
+| `agent.py` | Entry point, state-machine driver, command handlers, Friends/Link/guard event mapping |
 | `grpc_client.py` | Bidirectional stream + `CommandDispatcher` (pure command routing) |
 | `state_machine.py` | Pure worker state-machine table |
-| `steam_client.py` | Warm python-steam session, `derive_status`, GC match-ID + sentry (step 7) |
+| `steam_client.py` | Warm python-steam session, sentry-only login + interactive Steam Guard, `derive_status` (GC match-ID still pending) |
 | `dota_client.py` | GUI Dota automation — launch, join, camera (stub) |
 | `ffmpeg.py` | FFmpeg subprocess management (stub) |
 | `xorg/xorg.conf` | Headless NVIDIA display config (fill in BusID) |
