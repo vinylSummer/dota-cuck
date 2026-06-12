@@ -22,12 +22,15 @@ message WorkerEvent {
     StreamStarted      stream_started    = 6;
     ErrorEvent         error             = 7;
     FriendsResult      friends_result    = 8;
+    LinkResult         link_result       = 9;
   }
 }
 
 message WorkerReady        {}
 message StatusUpdate       { WorkerState state = 1; }
-message SteamGuardRequired { SteamGuardType guard_type = 1; }
+// request_id correlates the prompt with the LinkAccount/ListFriends/StartSpectate
+// login that raised it; empty for a session-driven (spectate) login in V1.
+message SteamGuardRequired { SteamGuardType guard_type = 1; string request_id = 2; }
 message MatchIdResolved    { uint64 match_id = 1; string steam_id = 2; }
 message StreamStarted      { string srt_url = 1; }
 message ErrorEvent         { string code = 1; string message = 2; bool fatal = 3; }
@@ -49,6 +52,15 @@ message Friend {
   bool   in_match     = 4;   // currently in a Dota 2 game
 }
 
+// Reply to a LinkAccount command, correlated by request_id. On success
+// owner_steam_id holds the logged-in account's own Steam ID (used to backfill
+// steam_accounts.steam_id); on failure `error` is set.
+message LinkResult {
+  string     request_id     = 1;
+  string     owner_steam_id = 2;
+  ErrorEvent error          = 3;
+}
+
 // === Commands: Control Plane → Worker ===
 
 message Command {
@@ -57,7 +69,18 @@ message Command {
     StopSpectate         stop_spectate   = 2;
     SubmitSteamGuardCode steam_guard     = 3;
     ListFriends          list_friends    = 4;
+    LinkAccount          link_account    = 5;
   }
+}
+
+// Standalone login to establish the worker's Steam Guard device trust (sentry)
+// and report the account's own Steam ID. Drives the interactive Steam Guard
+// flow at account-link time; the worker persists only the sentry, never the
+// login_key. Replies with LinkResult correlated by request_id.
+message LinkAccount {
+  string request_id     = 1;
+  string steam_username = 2;        // credentials decrypted in memory by control plane
+  string steam_password = 3;
 }
 
 message StartSpectate {
@@ -78,7 +101,9 @@ message ListFriends {
 }
 
 message StopSpectate         {}
-message SubmitSteamGuardCode { string code = 1; }
+// request_id correlates with the SteamGuardRequired prompt; empty for a
+// session-driven (spectate) login in V1.
+message SubmitSteamGuardCode { string code = 1; string request_id = 2; }
 
 // === Enums ===
 

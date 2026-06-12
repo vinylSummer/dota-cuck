@@ -15,7 +15,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x19spectator/v1/worker.proto\x12\x0cspectator.v1\"\x9a\x03\n\x0bWorkerEvent\x12\x11\n\tworker_id\x18\x01 \x01(\t\x12*\n\x05ready\x18\x02 \x01(\x0b\x32\x19.spectator.v1.WorkerReadyH\x00\x12\x33\n\rstatus_update\x18\x03 \x01(\x0b\x32\x1a.spectator.v1.StatusUpdateH\x00\x12\x37\n\x0bsteam_guard\x18\x04 \x01(\x0b\x32 .spectator.v1.SteamGuardRequiredH\x00\x12:\n\x11match_id_resolved\x18\x05 \x01(\x0b\x32\x1d.spectator.v1.MatchIdResolvedH\x00\x12\x35\n\x0estream_started\x18\x06 \x01(\x0b\x32\x1b.spectator.v1.StreamStartedH\x00\x12)\n\x05\x65rror\x18\x07 \x01(\x0b\x32\x18.spectator.v1.ErrorEventH\x00\x12\x35\n\x0e\x66riends_result\x18\x08 \x01(\x0b\x32\x1b.spectator.v1.FriendsResultH\x00\x42\t\n\x07payload\"\r\n\x0bWorkerReady\"8\n\x0cStatusUpdate\x12(\n\x05state\x18\x01 \x01(\x0e\x32\x19.spectator.v1.WorkerState\"F\n\x12SteamGuardRequired\x12\x30\n\nguard_type\x18\x01 \x01(\x0e\x32\x1c.spectator.v1.SteamGuardType\"5\n\x0fMatchIdResolved\x12\x10\n\x08match_id\x18\x01 \x01(\x04\x12\x10\n\x08steam_id\x18\x02 \x01(\t\" \n\rStreamStarted\x12\x0f\n\x07srt_url\x18\x01 \x01(\t\":\n\nErrorEvent\x12\x0c\n\x04\x63ode\x18\x01 \x01(\t\x12\x0f\n\x07message\x18\x02 \x01(\t\x12\r\n\x05\x66\x61tal\x18\x03 \x01(\x08\"\x8b\x01\n\rFriendsResult\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12%\n\x07\x66riends\x18\x02 \x03(\x0b\x32\x14.spectator.v1.Friend\x12\x16\n\x0eowner_steam_id\x18\x03 \x01(\t\x12\'\n\x05\x65rror\x18\x04 \x01(\x0b\x32\x18.spectator.v1.ErrorEvent\"R\n\x06\x46riend\x12\x10\n\x08steam_id\x18\x01 \x01(\t\x12\x14\n\x0cpersona_name\x18\x02 \x01(\t\x12\x0e\n\x06online\x18\x03 \x01(\x08\x12\x10\n\x08in_match\x18\x04 \x01(\x08\"\xee\x01\n\x07\x43ommand\x12\x35\n\x0estart_spectate\x18\x01 \x01(\x0b\x32\x1b.spectator.v1.StartSpectateH\x00\x12\x33\n\rstop_spectate\x18\x02 \x01(\x0b\x32\x1a.spectator.v1.StopSpectateH\x00\x12\x39\n\x0bsteam_guard\x18\x03 \x01(\x0b\x32\".spectator.v1.SubmitSteamGuardCodeH\x00\x12\x31\n\x0clist_friends\x18\x04 \x01(\x0b\x32\x19.spectator.v1.ListFriendsH\x00\x42\t\n\x07payload\"\x81\x01\n\rStartSpectate\x12\x12\n\nsession_id\x18\x01 \x01(\t\x12\x17\n\x0ftarget_steam_id\x18\x02 \x01(\t\x12\x16\n\x0esteam_username\x18\x03 \x01(\t\x12\x16\n\x0esteam_password\x18\x04 \x01(\t\x12\x13\n\x0bsentry_hash\x18\x05 \x01(\x0c\"f\n\x0bListFriends\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12\x16\n\x0esteam_username\x18\x02 \x01(\t\x12\x16\n\x0esteam_password\x18\x03 \x01(\t\x12\x13\n\x0bsentry_hash\x18\x04 \x01(\x0c\"\x0e\n\x0cStopSpectate\"$\n\x14SubmitSteamGuardCode\x12\x0c\n\x04\x63ode\x18\x01 \x01(\t*n\n\x0bWorkerState\x12\x1c\n\x18WORKER_STATE_UNSPECIFIED\x10\x00\x12\x0b\n\x07STOPPED\x10\x01\x12\x0c\n\x08STARTING\x10\x02\x12\x08\n\x04IDLE\x10\x03\x12\x0e\n\nSPECTATING\x10\x04\x12\x0c\n\x08STOPPING\x10\x05*I\n\x0eSteamGuardType\x12 \n\x1cSTEAM_GUARD_TYPE_UNSPECIFIED\x10\x00\x12\t\n\x05\x45MAIL\x10\x01\x12\n\n\x06MOBILE\x10\x02\x32\\\n\x13\x43ontrolPlaneService\x12\x45\n\rWorkerSession\x12\x19.spectator.v1.WorkerEvent\x1a\x15.spectator.v1.Command(\x01\x30\x01\x42\x33Z1github.com/vinylSummer/dota-cuck/gen/spectator/v1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x19spectator/v1/worker.proto\x12\x0cspectator.v1\"\xcb\x03\n\x0bWorkerEvent\x12\x11\n\tworker_id\x18\x01 \x01(\t\x12*\n\x05ready\x18\x02 \x01(\x0b\x32\x19.spectator.v1.WorkerReadyH\x00\x12\x33\n\rstatus_update\x18\x03 \x01(\x0b\x32\x1a.spectator.v1.StatusUpdateH\x00\x12\x37\n\x0bsteam_guard\x18\x04 \x01(\x0b\x32 .spectator.v1.SteamGuardRequiredH\x00\x12:\n\x11match_id_resolved\x18\x05 \x01(\x0b\x32\x1d.spectator.v1.MatchIdResolvedH\x00\x12\x35\n\x0estream_started\x18\x06 \x01(\x0b\x32\x1b.spectator.v1.StreamStartedH\x00\x12)\n\x05\x65rror\x18\x07 \x01(\x0b\x32\x18.spectator.v1.ErrorEventH\x00\x12\x35\n\x0e\x66riends_result\x18\x08 \x01(\x0b\x32\x1b.spectator.v1.FriendsResultH\x00\x12/\n\x0blink_result\x18\t \x01(\x0b\x32\x18.spectator.v1.LinkResultH\x00\x42\t\n\x07payload\"\r\n\x0bWorkerReady\"8\n\x0cStatusUpdate\x12(\n\x05state\x18\x01 \x01(\x0e\x32\x19.spectator.v1.WorkerState\"Z\n\x12SteamGuardRequired\x12\x30\n\nguard_type\x18\x01 \x01(\x0e\x32\x1c.spectator.v1.SteamGuardType\x12\x12\n\nrequest_id\x18\x02 \x01(\t\"5\n\x0fMatchIdResolved\x12\x10\n\x08match_id\x18\x01 \x01(\x04\x12\x10\n\x08steam_id\x18\x02 \x01(\t\" \n\rStreamStarted\x12\x0f\n\x07srt_url\x18\x01 \x01(\t\":\n\nErrorEvent\x12\x0c\n\x04\x63ode\x18\x01 \x01(\t\x12\x0f\n\x07message\x18\x02 \x01(\t\x12\r\n\x05\x66\x61tal\x18\x03 \x01(\x08\"\x8b\x01\n\rFriendsResult\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12%\n\x07\x66riends\x18\x02 \x03(\x0b\x32\x14.spectator.v1.Friend\x12\x16\n\x0eowner_steam_id\x18\x03 \x01(\t\x12\'\n\x05\x65rror\x18\x04 \x01(\x0b\x32\x18.spectator.v1.ErrorEvent\"R\n\x06\x46riend\x12\x10\n\x08steam_id\x18\x01 \x01(\t\x12\x14\n\x0cpersona_name\x18\x02 \x01(\t\x12\x0e\n\x06online\x18\x03 \x01(\x08\x12\x10\n\x08in_match\x18\x04 \x01(\x08\"a\n\nLinkResult\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12\x16\n\x0eowner_steam_id\x18\x02 \x01(\t\x12\'\n\x05\x65rror\x18\x03 \x01(\x0b\x32\x18.spectator.v1.ErrorEvent\"\xa1\x02\n\x07\x43ommand\x12\x35\n\x0estart_spectate\x18\x01 \x01(\x0b\x32\x1b.spectator.v1.StartSpectateH\x00\x12\x33\n\rstop_spectate\x18\x02 \x01(\x0b\x32\x1a.spectator.v1.StopSpectateH\x00\x12\x39\n\x0bsteam_guard\x18\x03 \x01(\x0b\x32\".spectator.v1.SubmitSteamGuardCodeH\x00\x12\x31\n\x0clist_friends\x18\x04 \x01(\x0b\x32\x19.spectator.v1.ListFriendsH\x00\x12\x31\n\x0clink_account\x18\x05 \x01(\x0b\x32\x19.spectator.v1.LinkAccountH\x00\x42\t\n\x07payload\"Q\n\x0bLinkAccount\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12\x16\n\x0esteam_username\x18\x02 \x01(\t\x12\x16\n\x0esteam_password\x18\x03 \x01(\t\"\x81\x01\n\rStartSpectate\x12\x12\n\nsession_id\x18\x01 \x01(\t\x12\x17\n\x0ftarget_steam_id\x18\x02 \x01(\t\x12\x16\n\x0esteam_username\x18\x03 \x01(\t\x12\x16\n\x0esteam_password\x18\x04 \x01(\t\x12\x13\n\x0bsentry_hash\x18\x05 \x01(\x0c\"f\n\x0bListFriends\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12\x16\n\x0esteam_username\x18\x02 \x01(\t\x12\x16\n\x0esteam_password\x18\x03 \x01(\t\x12\x13\n\x0bsentry_hash\x18\x04 \x01(\x0c\"\x0e\n\x0cStopSpectate\"8\n\x14SubmitSteamGuardCode\x12\x0c\n\x04\x63ode\x18\x01 \x01(\t\x12\x12\n\nrequest_id\x18\x02 \x01(\t*n\n\x0bWorkerState\x12\x1c\n\x18WORKER_STATE_UNSPECIFIED\x10\x00\x12\x0b\n\x07STOPPED\x10\x01\x12\x0c\n\x08STARTING\x10\x02\x12\x08\n\x04IDLE\x10\x03\x12\x0e\n\nSPECTATING\x10\x04\x12\x0c\n\x08STOPPING\x10\x05*I\n\x0eSteamGuardType\x12 \n\x1cSTEAM_GUARD_TYPE_UNSPECIFIED\x10\x00\x12\t\n\x05\x45MAIL\x10\x01\x12\n\n\x06MOBILE\x10\x02\x32\\\n\x13\x43ontrolPlaneService\x12\x45\n\rWorkerSession\x12\x19.spectator.v1.WorkerEvent\x1a\x15.spectator.v1.Command(\x01\x30\x01\x42\x33Z1github.com/vinylSummer/dota-cuck/gen/spectator/v1b\x06proto3')
 
 _WORKERSTATE = DESCRIPTOR.enum_types_by_name['WorkerState']
 WorkerState = enum_type_wrapper.EnumTypeWrapper(_WORKERSTATE)
@@ -41,7 +41,9 @@ _STREAMSTARTED = DESCRIPTOR.message_types_by_name['StreamStarted']
 _ERROREVENT = DESCRIPTOR.message_types_by_name['ErrorEvent']
 _FRIENDSRESULT = DESCRIPTOR.message_types_by_name['FriendsResult']
 _FRIEND = DESCRIPTOR.message_types_by_name['Friend']
+_LINKRESULT = DESCRIPTOR.message_types_by_name['LinkResult']
 _COMMAND = DESCRIPTOR.message_types_by_name['Command']
+_LINKACCOUNT = DESCRIPTOR.message_types_by_name['LinkAccount']
 _STARTSPECTATE = DESCRIPTOR.message_types_by_name['StartSpectate']
 _LISTFRIENDS = DESCRIPTOR.message_types_by_name['ListFriends']
 _STOPSPECTATE = DESCRIPTOR.message_types_by_name['StopSpectate']
@@ -109,12 +111,26 @@ Friend = _reflection.GeneratedProtocolMessageType('Friend', (_message.Message,),
   })
 _sym_db.RegisterMessage(Friend)
 
+LinkResult = _reflection.GeneratedProtocolMessageType('LinkResult', (_message.Message,), {
+  'DESCRIPTOR' : _LINKRESULT,
+  '__module__' : 'spectator.v1.worker_pb2'
+  # @@protoc_insertion_point(class_scope:spectator.v1.LinkResult)
+  })
+_sym_db.RegisterMessage(LinkResult)
+
 Command = _reflection.GeneratedProtocolMessageType('Command', (_message.Message,), {
   'DESCRIPTOR' : _COMMAND,
   '__module__' : 'spectator.v1.worker_pb2'
   # @@protoc_insertion_point(class_scope:spectator.v1.Command)
   })
 _sym_db.RegisterMessage(Command)
+
+LinkAccount = _reflection.GeneratedProtocolMessageType('LinkAccount', (_message.Message,), {
+  'DESCRIPTOR' : _LINKACCOUNT,
+  '__module__' : 'spectator.v1.worker_pb2'
+  # @@protoc_insertion_point(class_scope:spectator.v1.LinkAccount)
+  })
+_sym_db.RegisterMessage(LinkAccount)
 
 StartSpectate = _reflection.GeneratedProtocolMessageType('StartSpectate', (_message.Message,), {
   'DESCRIPTOR' : _STARTSPECTATE,
@@ -149,38 +165,42 @@ if _descriptor._USE_C_DESCRIPTORS == False:
 
   DESCRIPTOR._options = None
   DESCRIPTOR._serialized_options = b'Z1github.com/vinylSummer/dota-cuck/gen/spectator/v1'
-  _WORKERSTATE._serialized_start=1507
-  _WORKERSTATE._serialized_end=1617
-  _STEAMGUARDTYPE._serialized_start=1619
-  _STEAMGUARDTYPE._serialized_end=1692
+  _WORKERSTATE._serialized_start=1829
+  _WORKERSTATE._serialized_end=1939
+  _STEAMGUARDTYPE._serialized_start=1941
+  _STEAMGUARDTYPE._serialized_end=2014
   _WORKEREVENT._serialized_start=44
-  _WORKEREVENT._serialized_end=454
-  _WORKERREADY._serialized_start=456
-  _WORKERREADY._serialized_end=469
-  _STATUSUPDATE._serialized_start=471
-  _STATUSUPDATE._serialized_end=527
-  _STEAMGUARDREQUIRED._serialized_start=529
-  _STEAMGUARDREQUIRED._serialized_end=599
-  _MATCHIDRESOLVED._serialized_start=601
-  _MATCHIDRESOLVED._serialized_end=654
-  _STREAMSTARTED._serialized_start=656
-  _STREAMSTARTED._serialized_end=688
-  _ERROREVENT._serialized_start=690
-  _ERROREVENT._serialized_end=748
-  _FRIENDSRESULT._serialized_start=751
-  _FRIENDSRESULT._serialized_end=890
-  _FRIEND._serialized_start=892
-  _FRIEND._serialized_end=974
-  _COMMAND._serialized_start=977
-  _COMMAND._serialized_end=1215
-  _STARTSPECTATE._serialized_start=1218
-  _STARTSPECTATE._serialized_end=1347
-  _LISTFRIENDS._serialized_start=1349
-  _LISTFRIENDS._serialized_end=1451
-  _STOPSPECTATE._serialized_start=1453
-  _STOPSPECTATE._serialized_end=1467
-  _SUBMITSTEAMGUARDCODE._serialized_start=1469
-  _SUBMITSTEAMGUARDCODE._serialized_end=1505
-  _CONTROLPLANESERVICE._serialized_start=1694
-  _CONTROLPLANESERVICE._serialized_end=1786
+  _WORKEREVENT._serialized_end=503
+  _WORKERREADY._serialized_start=505
+  _WORKERREADY._serialized_end=518
+  _STATUSUPDATE._serialized_start=520
+  _STATUSUPDATE._serialized_end=576
+  _STEAMGUARDREQUIRED._serialized_start=578
+  _STEAMGUARDREQUIRED._serialized_end=668
+  _MATCHIDRESOLVED._serialized_start=670
+  _MATCHIDRESOLVED._serialized_end=723
+  _STREAMSTARTED._serialized_start=725
+  _STREAMSTARTED._serialized_end=757
+  _ERROREVENT._serialized_start=759
+  _ERROREVENT._serialized_end=817
+  _FRIENDSRESULT._serialized_start=820
+  _FRIENDSRESULT._serialized_end=959
+  _FRIEND._serialized_start=961
+  _FRIEND._serialized_end=1043
+  _LINKRESULT._serialized_start=1045
+  _LINKRESULT._serialized_end=1142
+  _COMMAND._serialized_start=1145
+  _COMMAND._serialized_end=1434
+  _LINKACCOUNT._serialized_start=1436
+  _LINKACCOUNT._serialized_end=1517
+  _STARTSPECTATE._serialized_start=1520
+  _STARTSPECTATE._serialized_end=1649
+  _LISTFRIENDS._serialized_start=1651
+  _LISTFRIENDS._serialized_end=1753
+  _STOPSPECTATE._serialized_start=1755
+  _STOPSPECTATE._serialized_end=1769
+  _SUBMITSTEAMGUARDCODE._serialized_start=1771
+  _SUBMITSTEAMGUARDCODE._serialized_end=1827
+  _CONTROLPLANESERVICE._serialized_start=2016
+  _CONTROLPLANESERVICE._serialized_end=2108
 # @@protoc_insertion_point(module_scope)
