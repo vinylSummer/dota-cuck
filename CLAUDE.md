@@ -46,8 +46,11 @@ nginx (TLS termination, dota.example.com:443)        │
 
 **Responsibilities:**
 - User authentication (JWT)
-- Steam account management (add, remove, list)
-- Friend status polling via Steam Web API
+- Steam account management (add, remove, list); encrypts credentials at link time
+- Friend list + in-match status — requested from the worker's authenticated Steam
+  session over gRPC, **not** the public Steam Web API (see Friends Data Source below)
+- In-memory credential-key cache (derived at login; used to encrypt/decrypt Steam
+  credentials without re-prompting)
 - Match session lifecycle management
 - Worker pool management (V1: single worker)
 - gRPC server — receives WorkerEvents, sends Commands via bidirectional stream
@@ -73,7 +76,12 @@ nginx (TLS termination, dota.example.com:443)        │
 **Responsibilities:**
 - Connect to control plane gRPC server on startup, open bidirectional stream
 - Receive Commands, send Events
-- Log into Steam (python-steam for GC queries; GUI Steam for Dota automation)
+- Log into Steam (python-steam for GC queries + friends listing; GUI Steam for Dota
+  automation). Set `set_credential_location` so sentries persist; capture the
+  `login_key` (`new_login_key` event) for password-less `relogin()` on later logins
+- List the logged-in account's friends with online + in-match status, on demand
+  (`ListFriends` command → `FriendsResult` event); reports its own `steam_id` so the
+  control plane can backfill `steam_accounts.steam_id`
 - Query Dota 2 Game Coordinator for live match ID for a given Steam ID
 - Launch and automate Dota 2 on headless Xorg (DISPLAY=:99)
 - Join match in spectator mode, select player-follow camera via console commands
@@ -85,6 +93,22 @@ nginx (TLS termination, dota.example.com:443)        │
 - `steam` (python-steam) + `dota2` (python-dota2) — GC communication
 - `grpcio` + `grpcio-tools` — gRPC client
 - `pyautogui` or `python-xlib` — GUI automation fallback if needed
+
+---
+
+### Friends Data Source (why not the Steam Web API)
+
+The friends list and in-match status come from the **worker's authenticated python-steam
+session**, not the Steam Web API. The Web API key is a developer key with no per-user
+authorization: `GetFriendList` returns `401` for private friend lists, and `GetPlayerSummaries`
+hides friends-only game presence — so it cannot reliably report whether a friend is in a Dota
+match (the core signal). Verified live (2026-06-12): valid key, public profile, friend list still
+`401`. An authenticated session sees exactly what the user sees, regardless of privacy.
+
+Flow: `GET /api/friends` → control plane decrypts credentials (in-memory key) → `ListFriends`
+command over the worker gRPC stream → worker logs in (relogin via `login_key` when available),
+lists friends, replies `FriendsResult` correlated by `request_id` → control plane maps to the DTO.
+V1 is on-demand (log in, fetch, reply); live presence push is V2.
 
 ---
 
@@ -157,6 +181,7 @@ message WorkerEvent {
     MatchIdResolved    match_id_resolved = 5;
     StreamStarted      stream_started    = 6;
     ErrorEvent         error             = 7;
+    FriendsResult      friends_result    = 8;
   }
 }
 
@@ -167,6 +192,23 @@ message MatchIdResolved    { uint64 match_id = 1; string steam_id = 2; }
 message StreamStarted      { string srt_url = 1; }
 message ErrorEvent         { string code = 1; string message = 2; bool fatal = 3; }
 
+// Response to a ListFriends command. Correlated by request_id. On failure,
+// `error` is set and `friends` is empty. `owner_steam_id` is the logged-in
+// account's own Steam ID, used to backfill steam_accounts.steam_id.
+message FriendsResult {
+  string     request_id     = 1;
+  repeated Friend friends    = 2;
+  string     owner_steam_id  = 3;
+  ErrorEvent error           = 4;
+}
+
+message Friend {
+  string steam_id     = 1;
+  string persona_name = 2;
+  bool   online       = 3;
+  bool   in_match     = 4;   // currently in a Dota 2 game
+}
+
 // === Commands: Control Plane → Worker ===
 
 message Command {
@@ -174,6 +216,7 @@ message Command {
     StartSpectate        start_spectate  = 1;
     StopSpectate         stop_spectate   = 2;
     SubmitSteamGuardCode steam_guard     = 3;
+    ListFriends          list_friends    = 4;
   }
 }
 
@@ -183,6 +226,15 @@ message StartSpectate {
   string steam_username  = 3;       // credentials decrypted in memory by control plane
   string steam_password  = 4;
   bytes  sentry_hash     = 5;       // device trust token if available; empty on first login
+}
+
+// On-demand friends fetch. The worker logs in (relogin via login_key when
+// available, else credentials), lists friends, and replies with FriendsResult.
+message ListFriends {
+  string request_id     = 1;        // correlates the FriendsResult reply
+  string steam_username  = 2;       // decrypted in memory by control plane
+  string steam_password  = 3;
+  bytes  sentry_hash     = 4;       // device trust token if available
 }
 
 message StopSpectate         {}
@@ -220,6 +272,9 @@ POST   /api/steam/accounts                    { steam_username, steam_password }
 DELETE /api/steam/accounts/:id
 
 GET    /api/friends                           friends list with online + in-match status
+                                              (served from the worker's authenticated Steam
+                                              session, not the Web API; 409 if no Steam
+                                              account linked, 502 on Steam/worker failure)
 
 POST   /api/sessions                          { target_steam_id } — start spectating
 DELETE /api/sessions/:id                      stop spectating
@@ -264,6 +319,7 @@ CREATE TABLE users (
   id            UUID        PRIMARY KEY DEFAULT uuidv7(),
   username      TEXT        UNIQUE NOT NULL,
   password_hash TEXT        NOT NULL,        -- Argon2id
+  kdf_salt      BYTEA       NOT NULL,        -- per-user salt for credential key derivation
   created_at    TIMESTAMPTZ DEFAULT now()
 );
 
@@ -271,7 +327,7 @@ CREATE TABLE users (
 CREATE TABLE steam_accounts (
   id             UUID  PRIMARY KEY DEFAULT uuidv7(),
   user_id        UUID  REFERENCES users(id) ON DELETE CASCADE,
-  steam_id       TEXT  NOT NULL,
+  steam_id       TEXT,                       -- backfilled from worker's first login; null until then
   steam_username TEXT  NOT NULL,
   enc_password   BYTEA NOT NULL,             -- AES-256-GCM ciphertext
   enc_nonce      BYTEA NOT NULL,             -- GCM nonce
@@ -308,26 +364,37 @@ CREATE TABLE sessions (
 ## Credential Security Model
 
 Steam passwords are encrypted at rest. The encryption key is derived from the user's login
-password and is **never stored**.
+password and is **never written to disk**.
 
 ```
 user_login_password
         │
-        ▼ Argon2id (time=3, memory=64MB, threads=4, keyLen=32)
+        ▼ Argon2id (time=3, memory=64MB, threads=4, keyLen=32, salt=users.kdf_salt)
 encryption_key (32 bytes)
         │
         ▼ AES-256-GCM
 enc_password + enc_nonce  →  stored in DB
 ```
 
-**At session start:**
-1. User's plaintext password is present in the login request
-2. Control plane re-derives the encryption key
-3. Decrypts `enc_password` in memory
-4. Passes plaintext credentials to worker via gRPC `StartSpectate` (internal Docker network only, no external exposure)
-5. Worker uses credentials, does not persist them
+**In-memory key cache.** The login password is only present at `POST /api/auth/login`. Other
+actions (linking a Steam account, listing friends, starting a spectate) are JWT-authed and do
+not carry it. So at login the control plane derives the key once and holds it in a server-side
+**in-memory cache** keyed by user, evicted on logout or token expiry. The cache is the only thing
+that can decrypt `enc_password`, and it never leaves RAM.
 
-**A database dump alone cannot decrypt Steam credentials.**
+**Account link (`POST /api/steam/accounts`):**
+1. Control plane takes the cached key for the user
+2. Encrypts the Steam password → `enc_password` + `enc_nonce`, stored in DB (`steam_id` left null)
+
+**Friends / session start:**
+1. Control plane takes the cached key, decrypts `enc_password` in memory
+2. Passes plaintext credentials to the worker via gRPC (`ListFriends` / `StartSpectate`) — internal
+   Docker network only, no external exposure
+3. Worker uses credentials, does not persist them (it may persist the sentry file and `login_key`
+   for password-less `relogin()`); reports its own `steam_id` to backfill the row
+
+**A database dump alone cannot decrypt Steam credentials** (the key is never persisted). A memory
+dump of the running control plane could expose cached keys — an accepted V1 tradeoff.
 
 ---
 
@@ -614,8 +681,13 @@ Dockerfile — it has large build time implications.
 3. Control plane skeleton — gRPC server accepts connections, HTTP router returns 501s, WebSocket hub compiles
 4. Worker skeleton — gRPC client connects, state machine logs transitions, no Steam yet
 5. Auth — register/login, Argon2id, JWT, AES-256-GCM credential storage
-6. Steam friend polling — Steam Web API integration, `/api/friends` endpoint
-7. Worker Steam/GC — python-steam login, GC match ID query, sentry persistence
+6. Friends — in-memory credential-key cache, account linking (`POST /api/steam/accounts`),
+   `ListFriends`/`FriendsResult` proto, worker-backed `/api/friends`, and the worker's
+   python-steam friend listing. (The Steam Web API client built earlier is retired as the
+   friends source — see "Friends Data Source".) Overlaps the worker Steam login of step 7.
+7. Worker Steam/GC — python-steam login (shared with friends), GC match ID query, sentry +
+   `login_key` persistence
+8. Worker Dota automation — headless launch, spectate command, camera follow
 8. Worker Dota automation — headless launch, spectate command, camera follow
 9. Worker FFmpeg pipeline — x11grab → hevc_nvenc → SRT → mediamtx
 10. Frontend — Login, Friends, Watch pages, SteamGuardModal, WebSocket integration
