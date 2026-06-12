@@ -15,10 +15,11 @@ type Server struct {
 	reg     *Registry
 	log     *slog.Logger
 	pending *pendingFriends
+	links   *pendingLinks
 }
 
 func NewServer(reg *Registry, log *slog.Logger) *Server {
-	return &Server{reg: reg, log: log, pending: newPendingFriends()}
+	return &Server{reg: reg, log: log, pending: newPendingFriends(), links: newPendingLinks()}
 }
 
 // WorkerSession is the long-lived bidirectional stream. The worker pushes
@@ -67,7 +68,9 @@ func (s *Server) handle(w *Worker, ev *pb.WorkerEvent) {
 	case *pb.WorkerEvent_StatusUpdate:
 		s.log.Info("worker status", "worker_id", w.ID, "state", p.StatusUpdate.GetState())
 	case *pb.WorkerEvent_SteamGuard:
-		s.log.Info("steam guard required", "worker_id", w.ID, "type", p.SteamGuard.GetGuardType())
+		s.log.Info("steam guard required", "worker_id", w.ID,
+			"type", p.SteamGuard.GetGuardType(), "request_id", p.SteamGuard.GetRequestId())
+		s.links.guard(p.SteamGuard.GetRequestId(), p.SteamGuard.GetGuardType())
 	case *pb.WorkerEvent_MatchIdResolved:
 		s.log.Info("match id resolved", "worker_id", w.ID, "match_id", p.MatchIdResolved.GetMatchId())
 	case *pb.WorkerEvent_StreamStarted:
@@ -77,6 +80,8 @@ func (s *Server) handle(w *Worker, ev *pb.WorkerEvent) {
 			"code", p.Error.GetCode(), "message", p.Error.GetMessage(), "fatal", p.Error.GetFatal())
 	case *pb.WorkerEvent_FriendsResult:
 		s.pending.deliver(p.FriendsResult)
+	case *pb.WorkerEvent_LinkResult:
+		s.links.deliver(p.LinkResult)
 	default:
 		s.log.Warn("unknown worker event", "worker_id", w.ID)
 	}

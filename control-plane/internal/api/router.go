@@ -2,7 +2,10 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"net/http"
+	"sync"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -47,6 +50,25 @@ type FriendsProvider interface {
 	ListFriends(ctx context.Context, username, password string, sentry []byte) (*FriendList, error)
 }
 
+// LinkCallbacks receive the asynchronous outcome of a StartLink. OnGuard may
+// fire before the terminal callback; then exactly one of OnLinked / OnError is
+// called. They may run on a different goroutine than StartLink's caller.
+type LinkCallbacks struct {
+	OnGuard  func(guardType string)
+	OnLinked func(ownerSteamID string)
+	OnError  func(err error)
+}
+
+// LinkProvider drives a worker login to establish the Steam Guard sentry and
+// report the account's Steam ID. StartLink returns immediately; the result
+// arrives via callbacks (the worker login can block on an interactive Steam
+// Guard prompt). SubmitGuardCode relays a code to the in-flight login by
+// request id. The concrete implementation drives the worker over gRPC.
+type LinkProvider interface {
+	StartLink(reqID, username, password string, cb LinkCallbacks)
+	SubmitGuardCode(reqID, code string) error
+}
+
 // Server holds the HTTP handler dependencies. Handlers for features not yet
 // built (steam linking, sessions) are still 501 stubs; the route surface is
 // wired so the API shape is locked, documented, and testable.
@@ -55,9 +77,15 @@ type Server struct {
 	users         UserStore
 	steamAccounts SteamAccountStore
 	friends       FriendsProvider
+	links         LinkProvider
 	hasher        *auth.Hasher
 	tokens        *auth.TokenManager
 	keys          *auth.KeyCache
+
+	// linkReqs maps an account id to the request id of its in-flight link, so a
+	// Steam Guard submission for that account can be routed to the right login.
+	linkMu   sync.Mutex
+	linkReqs map[string]string
 }
 
 // Deps are the Server's collaborators. Grouped in a struct so the constructor
@@ -67,6 +95,7 @@ type Deps struct {
 	Users         UserStore
 	SteamAccounts SteamAccountStore
 	Friends       FriendsProvider
+	Links         LinkProvider
 	Hasher        *auth.Hasher
 	Tokens        *auth.TokenManager
 	Keys          *auth.KeyCache
@@ -78,10 +107,39 @@ func NewServer(d Deps) *Server {
 		users:         d.Users,
 		steamAccounts: d.SteamAccounts,
 		friends:       d.Friends,
+		links:         d.Links,
 		hasher:        d.Hasher,
 		tokens:        d.Tokens,
 		keys:          d.Keys,
+		linkReqs:      make(map[string]string),
 	}
+}
+
+func (s *Server) setLinkReq(accountID, reqID string) {
+	s.linkMu.Lock()
+	defer s.linkMu.Unlock()
+	s.linkReqs[accountID] = reqID
+}
+
+func (s *Server) getLinkReq(accountID string) (string, bool) {
+	s.linkMu.Lock()
+	defer s.linkMu.Unlock()
+	reqID, ok := s.linkReqs[accountID]
+	return reqID, ok
+}
+
+func (s *Server) clearLinkReq(accountID string) {
+	s.linkMu.Lock()
+	defer s.linkMu.Unlock()
+	delete(s.linkReqs, accountID)
+}
+
+// newRequestID returns a random hex id used to correlate a link with its
+// asynchronous worker reply and Steam Guard prompt.
+func newRequestID() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
 // Router builds the Chi mux with every route from the HTTP API spec, plus the
@@ -106,6 +164,7 @@ func (s *Server) Router() http.Handler {
 				r.Get("/", s.ListSteamAccounts)
 				r.Post("/", s.AddSteamAccount)
 				r.Delete("/{id}", s.DeleteSteamAccount)
+				r.Post("/{id}/steamguard", s.SubmitAccountSteamGuard)
 			})
 			r.Get("/friends", s.ListFriends)
 			r.Route("/sessions", func(r chi.Router) {

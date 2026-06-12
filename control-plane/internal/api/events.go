@@ -6,9 +6,11 @@ package api
 // fields.
 type PushEvent struct {
 	Type      string `json:"type"`
-	SessionID string `json:"session_id"`
+	SessionID string `json:"session_id,omitempty"`
+	AccountID string `json:"account_id,omitempty"`
 	State     string `json:"state,omitempty"`
 	GuardType string `json:"guard_type,omitempty"`
+	SteamID   string `json:"steam_id,omitempty"`
 	WebRTCURL string `json:"webrtc_url,omitempty"`
 	Code      string `json:"code,omitempty"`
 	Message   string `json:"message,omitempty"`
@@ -32,4 +34,20 @@ func StreamReadyEvent(sessionID, webrtcURL string) PushEvent {
 // ErrorEvent: { "type": "error", "session_id": ..., "code": ..., "message": ... }
 func ErrorEvent(sessionID, code, message string) PushEvent {
 	return PushEvent{Type: "error", SessionID: sessionID, Code: code, Message: message}
+}
+
+// AccountGuardEvent: { "type": "steam_guard", "account_id": ..., "guard_type": ... }
+// The link-time counterpart of SteamGuardEvent (account-scoped, not session).
+func AccountGuardEvent(accountID, guardType string) PushEvent {
+	return PushEvent{Type: "steam_guard", AccountID: accountID, GuardType: guardType}
+}
+
+// AccountLinkedEvent: { "type": "account_linked", "account_id": ..., "steam_id": ... }
+func AccountLinkedEvent(accountID, steamID string) PushEvent {
+	return PushEvent{Type: "account_linked", AccountID: accountID, SteamID: steamID}
+}
+
+// AccountErrorEvent: { "type": "error", "account_id": ..., "code": ..., "message": ... }
+func AccountErrorEvent(accountID, code, message string) PushEvent {
+	return PushEvent{Type: "error", AccountID: accountID, Code: code, Message: message}
 }

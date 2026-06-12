@@ -113,8 +113,13 @@ POST   /api/auth/login               { username, password }
 POST   /api/auth/logout
 
 GET    /api/steam/accounts           list linked Steam accounts
-POST   /api/steam/accounts           { steam_username, steam_password }
+POST   /api/steam/accounts           { steam_username, steam_password } — stores creds, then
+                                     kicks off an async worker login to establish the Steam Guard
+                                     sentry + backfill steam_id (progress pushed over WS)
 DELETE /api/steam/accounts/:id
+POST   /api/steam/accounts/:id/steamguard  { code } — submit a Steam Guard code for an
+                                     in-progress account link (404 unknown account,
+                                     409 no prompt in progress)
 
 GET    /api/friends                  friends list with online + in-match status (served from the
                                      worker's Steam session; 409 if no Steam account linked,
@@ -130,11 +135,17 @@ WS     /ws                           push event stream
 
 **WebSocket push events (server → client)** — exact JSON shape; the frontend depends on these names:
 ```json
-{ "type": "session_state", "session_id": "...", "state": "WATCHING" }
-{ "type": "steam_guard",   "session_id": "...", "guard_type": "EMAIL" }
-{ "type": "stream_ready",  "session_id": "...", "webrtc_url": "https://dota.example.com/webrtc/live/match" }
-{ "type": "error",         "session_id": "...", "code": "DOTA_CRASH", "message": "..." }
+{ "type": "session_state",  "session_id": "...", "state": "WATCHING" }
+{ "type": "steam_guard",    "session_id": "...", "guard_type": "EMAIL" }
+{ "type": "steam_guard",    "account_id": "...", "guard_type": "EMAIL" }
+{ "type": "account_linked", "account_id": "...", "steam_id": "76561198..." }
+{ "type": "stream_ready",   "session_id": "...", "webrtc_url": "https://dota.example.com/webrtc/live/match" }
+{ "type": "error",          "session_id": "...", "code": "DOTA_CRASH",  "message": "..." }
+{ "type": "error",          "account_id": "...", "code": "LINK_FAILED", "message": "..." }
 ```
+Account-link events carry `account_id` (the link is not a session); spectate events carry
+`session_id`. The control plane resolves the one-time Steam Guard at account link, so post-link
+friends/spectate logins reuse the sentry and don't re-prompt.
 
 Documented with swaggo (`make docs`), served at `/docs`. See [docs/grpc-contract.md](docs/grpc-contract.md).
 
@@ -165,14 +176,22 @@ holds it in a server-side **in-memory cache** keyed by user, evicted on logout o
 It's the only thing that can decrypt `enc_password`, and never leaves RAM.
 
 - **Account link** (`POST /api/steam/accounts`): take the cached key, encrypt the Steam password
-  → `enc_password` + `enc_nonce` (steam_id left null).
+  → `enc_password` + `enc_nonce` (steam_id left null). Then pass the plaintext to the worker to
+  log in once, establish the Steam Guard **sentry**, and report `steam_id` to backfill the row.
 - **Friends / session start**: take the cached key, decrypt in memory, pass plaintext credentials
-  to the worker via gRPC (internal Docker network only). The worker doesn't persist them (it may
-  persist the sentry file + `login_key` for password-less relogin) and reports its `steam_id` to
-  backfill the row.
+  to the worker via gRPC (internal Docker network only). The worker passes them straight to Steam
+  and does not store them.
 
-A DB dump alone cannot decrypt Steam credentials (the key is never persisted). A memory dump of
-the running control plane could expose cached keys — an accepted V1 tradeoff.
+**Sentry only — the worker never persists the `login_key`.** The worker persists only the Steam
+Guard **sentry** (device-trust; suppresses the guard's *second factor*, useless without the
+password). It deliberately does *not* persist the `login_key`, which is a full relogin secret
+(password- and 2FA-free). Cold logins re-send the password (from the in-memory key cache) and
+rely on the sentry to skip the guard; this keeps the property that **no single at-rest artifact
+grants Steam account access**.
+
+A DB dump alone cannot decrypt Steam credentials (the key is never persisted), and the worker's
+sentry volume alone cannot authenticate (no password, no login_key). A memory dump of the running
+control plane could expose cached keys — an accepted V1 tradeoff.
 
 ---
 
@@ -251,8 +270,9 @@ Steps 1–6 are complete (proto, migrations, control-plane + worker skeletons, a
 5. Auth — register/login, Argon2id, JWT, AES-256-GCM credential storage ✓
 6. Friends — key cache, account linking, `ListFriends`/`FriendsResult`, worker-backed
    `/api/friends`, worker's warm python-steam friend listing ✓
-7. Worker Steam/GC — python-steam login (shared with friends), GC match-ID query, sentry +
-   `login_key` persistence
+7. Worker Steam/GC — python-steam login (shared with friends), sentry establishment via
+   `LinkAccount` + interactive Steam Guard at account link (sentry only, no `login_key`) ✓;
+   GC match-ID query still pending (gated on live validation below)
 8. Worker Dota automation — headless launch, spectate command, camera follow
 9. Worker FFmpeg pipeline — x11grab → hevc_nvenc → SRT → mediamtx
 10. Frontend — Login, Friends, Watch pages, SteamGuardModal, WebSocket integration

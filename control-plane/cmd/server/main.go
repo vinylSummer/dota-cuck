@@ -97,6 +97,7 @@ func main() {
 			Users:         db.Users,
 			SteamAccounts: db.SteamAccounts,
 			Friends:       friendsProvider{worker: workerSrv},
+			Links:         linkProvider{worker: workerSrv, log: log},
 			Hasher:        hasher,
 			Tokens:        tokens,
 			Keys:          keys,
@@ -165,4 +166,52 @@ func (f friendsProvider) ListFriends(ctx context.Context, username, password str
 		})
 	}
 	return list, nil
+}
+
+// linkProvider adapts the worker gRPC server to api.LinkProvider. StartLink runs
+// the (potentially Steam-Guard-blocking) login on its own goroutine and reports
+// the outcome through the callbacks; SubmitGuardCode relays a code to it.
+type linkProvider struct {
+	worker *workers.Server
+	log    *slog.Logger
+}
+
+// linkTimeout bounds a single account link, allowing time for the user to fetch
+// and submit a Steam Guard code.
+const linkTimeout = 5 * time.Minute
+
+func (l linkProvider) StartLink(reqID, username, password string, cb api.LinkCallbacks) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), linkTimeout)
+		defer cancel()
+
+		res, err := l.worker.Link(ctx, reqID, username, password, func(gt pb.SteamGuardType) {
+			cb.OnGuard(guardTypeString(gt))
+		})
+		if err != nil {
+			cb.OnError(err)
+			return
+		}
+		if e := res.GetError(); e != nil {
+			cb.OnError(fmt.Errorf("%s: %s", e.GetCode(), e.GetMessage()))
+			return
+		}
+		cb.OnLinked(res.GetOwnerSteamId())
+	}()
+}
+
+func (l linkProvider) SubmitGuardCode(reqID, code string) error {
+	return l.worker.SubmitGuardCode(reqID, code)
+}
+
+// guardTypeString maps the proto Steam Guard enum to the WebSocket guard_type.
+func guardTypeString(gt pb.SteamGuardType) string {
+	switch gt {
+	case pb.SteamGuardType_EMAIL:
+		return "EMAIL"
+	case pb.SteamGuardType_MOBILE:
+		return "MOBILE"
+	default:
+		return ""
+	}
 }
