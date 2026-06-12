@@ -21,6 +21,7 @@ message WorkerEvent {
     MatchIdResolved    match_id_resolved = 5;
     StreamStarted      stream_started    = 6;
     ErrorEvent         error             = 7;
+    FriendsResult      friends_result    = 8;
   }
 }
 
@@ -31,6 +32,23 @@ message MatchIdResolved    { uint64 match_id = 1; string steam_id = 2; }
 message StreamStarted      { string srt_url = 1; }
 message ErrorEvent         { string code = 1; string message = 2; bool fatal = 3; }
 
+// Reply to a ListFriends command, correlated by request_id. On failure `error`
+// is set and `friends` is empty. owner_steam_id is the logged-in account's own
+// Steam ID, used to backfill steam_accounts.steam_id.
+message FriendsResult {
+  string          request_id     = 1;
+  repeated Friend friends        = 2;
+  string          owner_steam_id = 3;
+  ErrorEvent      error          = 4;
+}
+
+message Friend {
+  string steam_id     = 1;
+  string persona_name = 2;
+  bool   online       = 3;
+  bool   in_match     = 4;   // currently in a Dota 2 game
+}
+
 // === Commands: Control Plane → Worker ===
 
 message Command {
@@ -38,6 +56,7 @@ message Command {
     StartSpectate        start_spectate  = 1;
     StopSpectate         stop_spectate   = 2;
     SubmitSteamGuardCode steam_guard     = 3;
+    ListFriends          list_friends    = 4;
   }
 }
 
@@ -47,6 +66,15 @@ message StartSpectate {
   string steam_username   = 3;      // credentials decrypted in memory by control plane
   string steam_password   = 4;
   bytes  sentry_hash      = 5;      // device trust token if available; empty on first login
+}
+
+// On-demand friends fetch. The worker logs in (relogin via login_key when
+// available, else credentials), lists friends, and replies with FriendsResult.
+message ListFriends {
+  string request_id     = 1;        // correlates the FriendsResult reply
+  string steam_username  = 2;       // credentials decrypted in memory by control plane
+  string steam_password  = 3;
+  bytes  sentry_hash     = 4;       // device trust token if available
 }
 
 message StopSpectate         {}
