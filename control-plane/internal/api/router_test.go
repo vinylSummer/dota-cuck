@@ -11,13 +11,25 @@ func testRouter(t *testing.T) http.Handler {
 	return srv.Router()
 }
 
+// testRouterWithToken returns a router and a valid bearer token for it.
+func testRouterWithToken(t *testing.T) (http.Handler, string) {
+	srv, _ := newTestServer(t)
+	token, err := srv.tokens.Issue("user-1")
+	if err != nil {
+		t.Fatalf("issue token: %v", err)
+	}
+	return srv.Router(), token
+}
+
 // Routes for not-yet-built features must be registered (501 = handler reached,
 // not 404). Auth routes are implemented and covered in auth_test.go.
 func TestDocumentedRoutesReturn501(t *testing.T) {
-	routes := []struct {
-		method, path string
-	}{
+	// Public stub.
+	public := []struct{ method, path string }{
 		{http.MethodPost, "/api/auth/logout"},
+	}
+	// Authenticated stubs (require a token to reach the handler).
+	authed := []struct{ method, path string }{
 		{http.MethodGet, "/api/steam/accounts"},
 		{http.MethodPost, "/api/steam/accounts"},
 		{http.MethodDelete, "/api/steam/accounts/abc"},
@@ -27,13 +39,46 @@ func TestDocumentedRoutesReturn501(t *testing.T) {
 		{http.MethodDelete, "/api/sessions/abc"},
 		{http.MethodPost, "/api/sessions/abc/steamguard"},
 	}
-	router := testRouter(t)
-	for _, rt := range routes {
-		req := httptest.NewRequest(rt.method, rt.path, nil)
+
+	router, token := testRouterWithToken(t)
+	check := func(method, path, auth string) {
+		req := httptest.NewRequest(method, path, nil)
+		if auth != "" {
+			req.Header.Set("Authorization", "Bearer "+auth)
+		}
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
 		if rec.Code != http.StatusNotImplemented {
-			t.Errorf("%s %s: status %d, want 501", rt.method, rt.path, rec.Code)
+			t.Errorf("%s %s: status %d, want 501", method, path, rec.Code)
+		}
+	}
+	for _, rt := range public {
+		check(rt.method, rt.path, "")
+	}
+	for _, rt := range authed {
+		check(rt.method, rt.path, token)
+	}
+}
+
+// Authenticated routes reject a missing or invalid token with 401.
+func TestProtectedRoutesRequireAuth(t *testing.T) {
+	router := testRouter(t)
+	cases := []struct {
+		name, authHeader string
+	}{
+		{"no header", ""},
+		{"garbage token", "Bearer not-a-jwt"},
+		{"wrong scheme", "Basic abc"},
+	}
+	for _, c := range cases {
+		req := httptest.NewRequest(http.MethodGet, "/api/friends", nil)
+		if c.authHeader != "" {
+			req.Header.Set("Authorization", c.authHeader)
+		}
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s: status %d, want 401", c.name, rec.Code)
 		}
 	}
 }
@@ -48,14 +93,14 @@ func TestUnknownRouteReturns404(t *testing.T) {
 	}
 }
 
-func TestWrongMethodNotImplementedRouteIs405(t *testing.T) {
-	// /api/friends is GET-only; a POST should be 405, proving the route exists
-	// but the method does not.
+func TestWrongMethodIs405(t *testing.T) {
+	// /api/auth/register is POST-only; a GET should be 405, proving the route
+	// exists but the method does not.
 	router := testRouter(t)
-	req := httptest.NewRequest(http.MethodPost, "/api/friends", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/register", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusMethodNotAllowed {
-		t.Errorf("POST /api/friends: status %d, want 405", rec.Code)
+		t.Errorf("GET /api/auth/register: status %d, want 405", rec.Code)
 	}
 }

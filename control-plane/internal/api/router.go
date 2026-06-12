@@ -50,22 +50,28 @@ func (s *Server) Router() http.Handler {
 	r.Use(middleware.Recoverer)
 
 	r.Route("/api", func(r chi.Router) {
+		// Public: no token required.
 		r.Route("/auth", func(r chi.Router) {
 			r.Post("/register", s.Register)
 			r.Post("/login", s.Login)
 			r.Post("/logout", s.Logout)
 		})
-		r.Route("/steam/accounts", func(r chi.Router) {
-			r.Get("/", s.ListSteamAccounts)
-			r.Post("/", s.AddSteamAccount)
-			r.Delete("/{id}", s.DeleteSteamAccount)
-		})
-		r.Get("/friends", s.ListFriends)
-		r.Route("/sessions", func(r chi.Router) {
-			r.Post("/", s.CreateSession)
-			r.Get("/{id}", s.GetSession)
-			r.Delete("/{id}", s.DeleteSession)
-			r.Post("/{id}/steamguard", s.SubmitSteamGuard)
+
+		// Authenticated routes.
+		r.Group(func(r chi.Router) {
+			r.Use(s.requireAuth)
+			r.Route("/steam/accounts", func(r chi.Router) {
+				r.Get("/", s.ListSteamAccounts)
+				r.Post("/", s.AddSteamAccount)
+				r.Delete("/{id}", s.DeleteSteamAccount)
+			})
+			r.Get("/friends", s.ListFriends)
+			r.Route("/sessions", func(r chi.Router) {
+				r.Post("/", s.CreateSession)
+				r.Get("/{id}", s.GetSession)
+				r.Delete("/{id}", s.DeleteSession)
+				r.Post("/{id}/steamguard", s.SubmitSteamGuard)
+			})
 		})
 	})
 
