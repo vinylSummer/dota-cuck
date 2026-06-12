@@ -128,6 +128,11 @@ const docTemplate = `{
         },
         "/friends": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -158,7 +163,7 @@ const docTemplate = `{
                         }
                     },
                     "502": {
-                        "description": "steam api error",
+                        "description": "worker/steam error",
                         "schema": {
                             "$ref": "#/definitions/api.ErrorResponse"
                         }

@@ -12,12 +12,13 @@ import (
 // connected worker.
 type Server struct {
 	pb.UnimplementedControlPlaneServiceServer
-	reg *Registry
-	log *slog.Logger
+	reg     *Registry
+	log     *slog.Logger
+	pending *pendingFriends
 }
 
 func NewServer(reg *Registry, log *slog.Logger) *Server {
-	return &Server{reg: reg, log: log}
+	return &Server{reg: reg, log: log, pending: newPendingFriends()}
 }
 
 // WorkerSession is the long-lived bidirectional stream. The worker pushes
@@ -74,6 +75,8 @@ func (s *Server) handle(w *Worker, ev *pb.WorkerEvent) {
 	case *pb.WorkerEvent_Error:
 		s.log.Warn("worker error", "worker_id", w.ID,
 			"code", p.Error.GetCode(), "message", p.Error.GetMessage(), "fatal", p.Error.GetFatal())
+	case *pb.WorkerEvent_FriendsResult:
+		s.pending.deliver(p.FriendsResult)
 	default:
 		s.log.Warn("unknown worker event", "worker_id", w.ID)
 	}

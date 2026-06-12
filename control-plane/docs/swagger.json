@@ -121,6 +121,11 @@
         },
         "/friends": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -151,7 +156,7 @@
                         }
                     },
                     "502": {
-                        "description": "steam api error",
+                        "description": "worker/steam error",
                         "schema": {
                             "$ref": "#/definitions/api.ErrorResponse"
                         }

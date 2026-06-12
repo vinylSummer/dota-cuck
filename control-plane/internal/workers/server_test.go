@@ -16,12 +16,13 @@ import (
 
 // startServer spins the gRPC server on an in-memory bufconn listener and
 // returns a connected client stub plus the registry under test.
-func startServer(t *testing.T) (pb.ControlPlaneServiceClient, *Registry) {
+func startServer(t *testing.T) (pb.ControlPlaneServiceClient, *Registry, *Server) {
 	t.Helper()
 	lis := bufconn.Listen(1 << 20)
 	reg := NewRegistry()
+	cpSrv := NewServer(reg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	srv := grpc.NewServer()
-	pb.RegisterControlPlaneServiceServer(srv, NewServer(reg, slog.New(slog.NewTextHandler(io.Discard, nil))))
+	pb.RegisterControlPlaneServiceServer(srv, cpSrv)
 	go func() { _ = srv.Serve(lis) }()
 
 	conn, err := grpc.NewClient("passthrough://bufnet",
@@ -37,7 +38,7 @@ func startServer(t *testing.T) (pb.ControlPlaneServiceClient, *Registry) {
 		conn.Close()
 		srv.Stop()
 	})
-	return pb.NewControlPlaneServiceClient(conn), reg
+	return pb.NewControlPlaneServiceClient(conn), reg, cpSrv
 }
 
 func waitFor(t *testing.T, cond func() bool) {
@@ -53,7 +54,7 @@ func waitFor(t *testing.T, cond func() bool) {
 }
 
 func TestWorkerReadyRegistersWorker(t *testing.T) {
-	client, reg := startServer(t)
+	client, reg, _ := startServer(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -72,7 +73,7 @@ func TestWorkerReadyRegistersWorker(t *testing.T) {
 }
 
 func TestPushedCommandReachesWorker(t *testing.T) {
-	client, reg := startServer(t)
+	client, reg, _ := startServer(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

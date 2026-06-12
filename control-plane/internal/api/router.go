@@ -9,7 +9,6 @@ import (
 	httpSwagger "github.com/swaggo/http-swagger/v2"
 
 	"github.com/vinylSummer/dota-cuck/internal/auth"
-	"github.com/vinylSummer/dota-cuck/internal/steam"
 	"github.com/vinylSummer/dota-cuck/internal/store"
 )
 
@@ -23,13 +22,29 @@ type UserStore interface {
 type SteamAccountStore interface {
 	Create(ctx context.Context, userID, steamUsername string, encPassword, encNonce []byte) (string, error)
 	GetByUserID(ctx context.Context, userID string) (*store.SteamAccount, error)
+	SetSteamID(ctx context.Context, id, steamID string) error
 	Delete(ctx context.Context, userID, id string) error
 }
 
-// FriendsProvider fetches a Steam account's friends with live status. The
-// concrete implementation is *steam.Client.
+// FriendStatus is one friend with derived live status.
+type FriendStatus struct {
+	SteamID     string
+	PersonaName string
+	Online      bool
+	InMatch     bool
+}
+
+// FriendList is the result of a friends fetch: the friends plus the logged-in
+// account's own Steam ID (used to backfill steam_accounts.steam_id).
+type FriendList struct {
+	OwnerSteamID string
+	Friends      []FriendStatus
+}
+
+// FriendsProvider fetches friends for a set of Steam credentials. The concrete
+// implementation drives the worker over gRPC (an authenticated Steam session).
 type FriendsProvider interface {
-	Friends(ctx context.Context, steamID string) ([]steam.Friend, error)
+	ListFriends(ctx context.Context, username, password string, sentry []byte) (*FriendList, error)
 }
 
 // Server holds the HTTP handler dependencies. Handlers for features not yet
@@ -39,7 +54,7 @@ type Server struct {
 	hub           *Hub
 	users         UserStore
 	steamAccounts SteamAccountStore
-	steam         FriendsProvider
+	friends       FriendsProvider
 	hasher        *auth.Hasher
 	tokens        *auth.TokenManager
 	keys          *auth.KeyCache
@@ -51,7 +66,7 @@ type Deps struct {
 	Hub           *Hub
 	Users         UserStore
 	SteamAccounts SteamAccountStore
-	Steam         FriendsProvider
+	Friends       FriendsProvider
 	Hasher        *auth.Hasher
 	Tokens        *auth.TokenManager
 	Keys          *auth.KeyCache
@@ -62,7 +77,7 @@ func NewServer(d Deps) *Server {
 		hub:           d.Hub,
 		users:         d.Users,
 		steamAccounts: d.SteamAccounts,
-		steam:         d.Steam,
+		friends:       d.Friends,
 		hasher:        d.Hasher,
 		tokens:        d.Tokens,
 		keys:          d.Keys,

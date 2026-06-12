@@ -79,9 +79,13 @@ nginx (TLS termination, dota.example.com:443)        │
 - Log into Steam (python-steam for GC queries + friends listing; GUI Steam for Dota
   automation). Set `set_credential_location` so sentries persist; capture the
   `login_key` (`new_login_key` event) for password-less `relogin()` on later logins
-- List the logged-in account's friends with online + in-match status, on demand
-  (`ListFriends` command → `FriendsResult` event); reports its own `steam_id` so the
-  control plane can backfill `steam_accounts.steam_id`
+- Keep one **warm** headless python-steam session (lazily connected on the first
+  `ListFriends`, kept alive via `run_forever`/relogin) so friends are served
+  instantly. List the logged-in account's friends with online + in-match status
+  (`ListFriends` command → `FriendsResult` event); report its own `steam_id` so the
+  control plane can backfill `steam_accounts.steam_id`. The headless session is
+  **dropped while spectating** (GUI Steam needs the account — dual-session) and
+  re-warms lazily afterwards
 - Query Dota 2 Game Coordinator for live match ID for a given Steam ID
 - Launch and automate Dota 2 on headless Xorg (DISPLAY=:99)
 - Join match in spectator mode, select player-follow camera via console commands
@@ -106,9 +110,11 @@ match (the core signal). Verified live (2026-06-12): valid key, public profile, 
 `401`. An authenticated session sees exactly what the user sees, regardless of privacy.
 
 Flow: `GET /api/friends` → control plane decrypts credentials (in-memory key) → `ListFriends`
-command over the worker gRPC stream → worker logs in (relogin via `login_key` when available),
-lists friends, replies `FriendsResult` correlated by `request_id` → control plane maps to the DTO.
-V1 is on-demand (log in, fetch, reply); live presence push is V2.
+command over the worker gRPC stream → worker connects its warm headless session if not already
+connected (relogin via `login_key` when available), lists friends, replies `FriendsResult`
+correlated by `request_id` → control plane maps to the DTO. The control plane always **pulls** on
+request; the worker keeps the session **warm** between calls so the reply is fast. Live presence
+*push* to the browser is V2.
 
 ---
 
@@ -228,8 +234,9 @@ message StartSpectate {
   bytes  sentry_hash     = 5;       // device trust token if available; empty on first login
 }
 
-// On-demand friends fetch. The worker logs in (relogin via login_key when
-// available, else credentials), lists friends, and replies with FriendsResult.
+// Friends fetch. The worker serves this from its warm headless session,
+// connecting lazily (relogin via login_key when available, else credentials)
+// on the first call, then replying with FriendsResult.
 message ListFriends {
   string request_id     = 1;        // correlates the FriendsResult reply
   string steam_username  = 2;       // decrypted in memory by control plane
@@ -657,14 +664,17 @@ Dockerfile — it has large build time implications.
 **In V1:**
 - User registration and login
 - One linked Steam account per user
-- Steam friends list with in-match status
+- Steam friends list with in-match status, served from a **warm headless python-steam
+  session** (kept alive between friends calls; dropped during spectate)
 - Start / stop spectating (single worker, single concurrent session)
 - Steam Guard interactive flow (modal in frontend)
 - WebRTC stream in browser (fullscreen)
 - Error display
 
 **Explicitly deferred to V2:**
-- WARM state (keep Steam/Dota alive between sessions)
+- WARM state for **Dota/GUI Steam** (keep the game alive between spectate sessions; the
+  headless friends session warmth above is V1)
+- Live presence *push* to the browser (V1 pulls on request)
 - Multiple concurrent sessions and worker pool
 - Frame interpolation (nvinterpolate ffmpeg filter)
 - Match session sharing (multiple viewers, one Dota instance)

@@ -202,9 +202,11 @@ paths:
           schema:
             $ref: '#/definitions/api.ErrorResponse'
         "502":
-          description: steam api error
+          description: worker/steam error
           schema:
             $ref: '#/definitions/api.ErrorResponse'
+      security:
+      - BearerAuth: []
       summary: List Steam friends with online and in-match status
       tags:
       - friends

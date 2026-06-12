@@ -10,6 +10,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -22,7 +23,6 @@ import (
 	pb "github.com/vinylSummer/dota-cuck/gen/spectator/v1"
 	"github.com/vinylSummer/dota-cuck/internal/api"
 	"github.com/vinylSummer/dota-cuck/internal/auth"
-	"github.com/vinylSummer/dota-cuck/internal/steam"
 	"github.com/vinylSummer/dota-cuck/internal/store"
 	"github.com/vinylSummer/dota-cuck/internal/workers"
 	"google.golang.org/grpc"
@@ -59,7 +59,6 @@ func main() {
 	databaseURL := mustEnv(log, "DATABASE_URL")
 	jwtSecret := mustEnv(log, "JWT_SECRET")
 	credentialPepper := mustEnv(log, "CREDENTIAL_PEPPER")
-	steamAPIKey := mustEnv(log, "STEAM_API_KEY")
 
 	const sessionTTL = 24 * time.Hour
 
@@ -86,10 +85,9 @@ func main() {
 	defer db.Close()
 
 	reg := workers.NewRegistry()
+	workerSrv := workers.NewServer(reg, log)
 	grpcServer := grpc.NewServer()
-	pb.RegisterControlPlaneServiceServer(grpcServer, workers.NewServer(reg, log))
-
-	steamClient := steam.NewClient(steamAPIKey)
+	pb.RegisterControlPlaneServiceServer(grpcServer, workerSrv)
 
 	hub := api.NewHub(log)
 	httpServer := &http.Server{
@@ -98,7 +96,7 @@ func main() {
 			Hub:           hub,
 			Users:         db.Users,
 			SteamAccounts: db.SteamAccounts,
-			Steam:         steamClient,
+			Friends:       friendsProvider{worker: workerSrv},
 			Hasher:        hasher,
 			Tokens:        tokens,
 			Keys:          keys,
@@ -141,4 +139,30 @@ func main() {
 	}
 	grpcServer.GracefulStop()
 	log.Info("stopped")
+}
+
+// friendsProvider adapts the worker gRPC server to api.FriendsProvider: it sends
+// a ListFriends command over the worker stream and maps the FriendsResult.
+type friendsProvider struct {
+	worker *workers.Server
+}
+
+func (f friendsProvider) ListFriends(ctx context.Context, username, password string, sentry []byte) (*api.FriendList, error) {
+	res, err := f.worker.ListFriends(ctx, username, password, sentry)
+	if err != nil {
+		return nil, err
+	}
+	if e := res.GetError(); e != nil {
+		return nil, fmt.Errorf("worker: %s: %s", e.GetCode(), e.GetMessage())
+	}
+	list := &api.FriendList{OwnerSteamID: res.GetOwnerSteamId()}
+	for _, fr := range res.GetFriends() {
+		list.Friends = append(list.Friends, api.FriendStatus{
+			SteamID:     fr.GetSteamId(),
+			PersonaName: fr.GetPersonaName(),
+			Online:      fr.GetOnline(),
+			InMatch:     fr.GetInMatch(),
+		})
+	}
+	return list, nil
 }
