@@ -10,8 +10,10 @@ SWAG    ?= $(GOBIN)/swag
 # Run all unit tests (control plane + worker).
 test: test-go test-py
 
+# DB-backed tests require PostgreSQL at POSTGRESQL_URL. with-test-db.sh spins up
+# an ephemeral cluster for the run (or uses POSTGRESQL_URL if already set).
 test-go:
-	cd control-plane && go test ./...
+	scripts/with-test-db.sh sh -c 'cd control-plane && go test ./...'
 
 # Uses the worker venv; create it with: python3 -m venv worker/.venv && \
 #   worker/.venv/bin/pip install -r worker/requirements-dev.txt

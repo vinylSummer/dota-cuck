@@ -108,7 +108,7 @@ info:
   contact: {}
   description: |-
     Self-hosted service to spectate live Dota 2 matches of Steam friends.
-    All handlers are skeleton stubs (501) until their feature steps land.
+    Auth (register/login) is live; other handlers return 501 until their feature steps land.
   title: Dota Spectator Control Plane API
   version: "1.0"
 paths:

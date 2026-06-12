@@ -1,25 +1,22 @@
 package api
 
 import (
-	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 )
 
-func testRouter() http.Handler {
-	hub := NewHub(slog.New(slog.NewTextHandler(io.Discard, nil)))
-	return NewServer(hub).Router()
+func testRouter(t *testing.T) http.Handler {
+	srv, _ := newTestServer(t)
+	return srv.Router()
 }
 
-// Every documented route must be registered (501 = handler reached, not 404).
+// Routes for not-yet-built features must be registered (501 = handler reached,
+// not 404). Auth routes are implemented and covered in auth_test.go.
 func TestDocumentedRoutesReturn501(t *testing.T) {
 	routes := []struct {
 		method, path string
 	}{
-		{http.MethodPost, "/api/auth/register"},
-		{http.MethodPost, "/api/auth/login"},
 		{http.MethodPost, "/api/auth/logout"},
 		{http.MethodGet, "/api/steam/accounts"},
 		{http.MethodPost, "/api/steam/accounts"},
@@ -30,7 +27,7 @@ func TestDocumentedRoutesReturn501(t *testing.T) {
 		{http.MethodDelete, "/api/sessions/abc"},
 		{http.MethodPost, "/api/sessions/abc/steamguard"},
 	}
-	router := testRouter()
+	router := testRouter(t)
 	for _, rt := range routes {
 		req := httptest.NewRequest(rt.method, rt.path, nil)
 		rec := httptest.NewRecorder()
@@ -42,7 +39,7 @@ func TestDocumentedRoutesReturn501(t *testing.T) {
 }
 
 func TestUnknownRouteReturns404(t *testing.T) {
-	router := testRouter()
+	router := testRouter(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/does-not-exist", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -54,7 +51,7 @@ func TestUnknownRouteReturns404(t *testing.T) {
 func TestWrongMethodNotImplementedRouteIs405(t *testing.T) {
 	// /api/friends is GET-only; a POST should be 405, proving the route exists
 	// but the method does not.
-	router := testRouter()
+	router := testRouter(t)
 	req := httptest.NewRequest(http.MethodPost, "/api/friends", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)

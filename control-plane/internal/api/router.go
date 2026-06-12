@@ -1,22 +1,46 @@
 package api
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	httpSwagger "github.com/swaggo/http-swagger/v2"
+
+	"github.com/vinylSummer/dota-cuck/internal/auth"
+	"github.com/vinylSummer/dota-cuck/internal/store"
 )
 
-// Server holds the HTTP handler dependencies. Handlers are skeleton stubs
-// (501) until their feature steps land; the route surface is wired now so the
-// API shape is locked, documented, and testable.
-type Server struct {
-	hub *Hub
+// UserStore is the slice of persistence the auth handlers need. The concrete
+// implementation is *store.UserStore; the interface keeps handlers testable
+// with a fake and free of a database dependency.
+type UserStore interface {
+	Create(ctx context.Context, username, passwordHash string, kdfSalt []byte) (string, error)
+	GetByUsername(ctx context.Context, username string) (*store.User, error)
 }
 
-func NewServer(hub *Hub) *Server {
-	return &Server{hub: hub}
+// Server holds the HTTP handler dependencies. Handlers for features not yet
+// built (steam, friends, sessions) are still 501 stubs; the route surface is
+// wired so the API shape is locked, documented, and testable.
+type Server struct {
+	hub    *Hub
+	users  UserStore
+	hasher *auth.Hasher
+	tokens *auth.TokenManager
+}
+
+// Deps are the Server's collaborators. Grouped in a struct so the constructor
+// signature stays stable as more are added.
+type Deps struct {
+	Hub    *Hub
+	Users  UserStore
+	Hasher *auth.Hasher
+	Tokens *auth.TokenManager
+}
+
+func NewServer(d Deps) *Server {
+	return &Server{hub: d.Hub, users: d.Users, hasher: d.Hasher, tokens: d.Tokens}
 }
 
 // Router builds the Chi mux with every route from the HTTP API spec, plus the

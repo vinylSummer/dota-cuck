@@ -634,6 +634,17 @@ worth covering.
 
 `make test` runs `go test ./...` (control plane) and `pytest` (worker).
 
+**Database-backed tests run against real PostgreSQL, not a mock.** Anything that
+touches the DB (the `store` package and the auth HTTP handlers) requires a
+running instance at `POSTGRESQL_URL`; without it those tests **fail loudly**,
+they do not skip. `make test-go` wraps the run in `scripts/with-test-db.sh`,
+which spins up an ephemeral cluster (`initdb` + `pg_ctl`, unix-socket only, torn
+down after) and sets `POSTGRESQL_URL` — so contributors don't need to configure
+anything, and the code is exercised against the same engine and migrations as
+production. `internal/testdb` gives each test a fresh throwaway database with all
+migrations applied. Set `POSTGRESQL_URL` yourself to run against an existing
+instance; set `PG_BINDIR` if `initdb`/`pg_ctl` aren't on `PATH` (e.g. Debian).
+
 **Design constraint:** the session and worker state machines must be **pure transition functions /
 tables** (e.g. `Next(cur, event) (next, error)`), not logic buried inside handlers. This is the
 right shape regardless and is what makes them testable.
@@ -658,8 +669,9 @@ Worker (Python, `pytest`):
 - **Command dispatch** (`grpc_client.py`): each `Command` oneof variant routes to the correct
   (mocked) handler.
 
-Deferred: DB migrations (apply-against-Postgres is integration, not unit). Auth/crypto tests land
-with **step 5** — Argon2id and AES-256-GCM are the most important tests in the project.
+Auth/crypto tests land with **step 5** — Argon2id and AES-256-GCM are the most important tests in
+the project. Migrations are exercised transitively: `internal/testdb` applies every
+`db/migrations/*.sql` against the throwaway database before each DB-backed test runs.
 
 ---
 

@@ -562,7 +562,7 @@ var SwaggerInfo = &swag.Spec{
 	BasePath:         "/api",
 	Schemes:          []string{},
 	Title:            "Dota Spectator Control Plane API",
-	Description:      "Self-hosted service to spectate live Dota 2 matches of Steam friends.\nAll handlers are skeleton stubs (501) until their feature steps land.",
+	Description:      "Self-hosted service to spectate live Dota 2 matches of Steam friends.\nAuth (register/login) is live; other handlers return 501 until their feature steps land.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

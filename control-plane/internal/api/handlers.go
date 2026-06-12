@@ -2,37 +2,15 @@ package api
 
 import "net/http"
 
-// HTTP handlers. All are skeleton stubs returning 501 until their feature steps
-// land (auth: step 5, friends: step 6, sessions: steps 5/8). The swaggo
-// annotations above each handler are the source for the generated OpenAPI spec.
+// HTTP handlers. Those for features not yet built return 501 (friends: step 6,
+// steam/sessions: later steps). Auth (register/login) is implemented in
+// auth.go. The swaggo annotations above each handler are the source for the
+// generated OpenAPI spec.
 
 // notImplemented writes a 501 with an ErrorResponse-shaped body.
 func notImplemented(w http.ResponseWriter, _ *http.Request) {
 	http.Error(w, `{"error":"not implemented"}`, http.StatusNotImplemented)
 }
-
-// Register godoc
-// @Summary      Register a new user
-// @Tags         auth
-// @Accept       json
-// @Produce      json
-// @Param        body  body      RegisterRequest  true  "credentials"
-// @Success      201   {object}  LoginResponse
-// @Failure      400   {object}  ErrorResponse
-// @Failure      409   {object}  ErrorResponse  "username taken"
-// @Router       /auth/register [post]
-func (s *Server) Register(w http.ResponseWriter, r *http.Request) { notImplemented(w, r) }
-
-// Login godoc
-// @Summary      Log in and receive a JWT
-// @Tags         auth
-// @Accept       json
-// @Produce      json
-// @Param        body  body      LoginRequest  true  "credentials"
-// @Success      200   {object}  LoginResponse
-// @Failure      401   {object}  ErrorResponse
-// @Router       /auth/login [post]
-func (s *Server) Login(w http.ResponseWriter, r *http.Request) { notImplemented(w, r) }
 
 // Logout godoc
 // @Summary      Log out the current session
