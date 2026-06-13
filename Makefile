@@ -6,10 +6,12 @@ UVRUN   := $(UV) run --project worker
 
 SWAG    ?= $(GOBIN)/swag
 
-.PHONY: proto proto-tools proto-lint proto-clean test test-go test-py docs
+NPM     ?= npm
 
-# Run all unit tests (control plane + worker).
-test: test-go test-py
+.PHONY: proto proto-tools proto-lint proto-clean test test-go test-py test-fe docs
+
+# Run all unit tests (control plane + worker + frontend).
+test: test-go test-py test-fe
 
 # DB-backed tests require PostgreSQL at POSTGRESQL_URL. with-test-db.sh spins up
 # an ephemeral cluster for the run (or uses POSTGRESQL_URL if already set).
@@ -19,6 +21,11 @@ test-go:
 # uv fetches Python 3.10 and syncs worker deps on first run.
 test-py:
 	cd worker && $(UV) run pytest -q
+
+# Frontend unit tests (Vitest + MSW). Installs deps on first run if absent.
+test-fe:
+	cd frontend && [ -d node_modules ] || $(NPM) install
+	cd frontend && $(NPM) test
 
 # Regenerate Go + Python stubs from proto/. Idempotent. grpcio-tools 1.48.x
 # emits protobuf-3 gencode (no --pyi_out plugin in that line).
