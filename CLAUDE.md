@@ -86,10 +86,14 @@ the session **warm** between calls. Live presence *push* to the browser is V2.
 
 - **mediamtx** — Docker container; SRT in from the worker, WebRTC out to the browser. See
   [docs/deployment.md](docs/deployment.md).
-- **Frontend** — barebones React SPA, functionality over appearance. Pages: `/login`,
-  `/` (friends list + Spectate button), `/watch/:sessionId` (fullscreen WebRTC + disconnect).
-  `SteamGuardModal` appears on a `steam_guard` WS event and submits to
-  `/api/sessions/:id/steamguard`. A single WebSocket on authenticated pages handles all push events.
+- **Frontend** — barebones Vite + React SPA (react-router-dom), functionality over appearance.
+  Pages: `/login` (login/register), `/` (friends list + Spectate button, falls back to the
+  account-link form on a `409`), `/watch/:sessionId` (fullscreen WebRTC via WHEP + disconnect).
+  `SteamGuardModal` appears on a `steam_guard` WS event and submits to the account
+  (`/api/steam/accounts/:id/steamguard`) or session (`/api/sessions/:id/steamguard`) endpoint by
+  event scope. `App` owns auth state, the single WebSocket, and the global guard modal. Decision
+  logic (`ws.routeEvent`, `api` request contract, `auth.isAuthed`, `status.canSpectate`) is
+  extracted into pure functions and unit-tested (Vitest + MSW); see [docs/testing.md](docs/testing.md).
 - **nginx** — host TLS termination + proxy to control plane / mediamtx. See
   [docs/deployment.md](docs/deployment.md).
 
@@ -236,7 +240,11 @@ worker/                 uv project (Python 3.10); see docs/worker.md
   agent.py grpc_client.py state_machine.py steam_client.py dota_client.py ffmpeg.py
   xorg/xorg.conf  gen/  pyproject.toml  .python-version
 
-frontend/               React SPA (App, api.js, ws.js, pages/, components/SteamGuardModal)
+frontend/               Vite + React SPA (Vitest + MSW tests)
+  index.html  vite.config.js  package.json
+  src/  App.jsx main.jsx api.js ws.js auth.js status.js webrtc.js styles.css
+        pages/ (Login, Friends, Watch)  components/ (SteamGuardModal, AccountLink)
+        __tests__/  test/ (fixtures.js, setup.js)
 mediamtx/mediamtx.yml   nginx/nginx.conf   docker-compose.yml
 docs/                   Extended reference (see top of this file)
 ```
@@ -261,7 +269,9 @@ Kubernetes; PWA/mobile; AI-assisted crash recovery.
 
 ## Implementation Order
 
-Steps 1–6 are complete (proto, migrations, control-plane + worker skeletons, auth, friends).
+Steps 1–6 are complete (proto, migrations, control-plane + worker skeletons, auth, friends);
+step 7 is done bar the GC match-ID query, and step 10 (frontend) is complete. Steps 8–9
+(worker spectate path) and 11–12 (deployment) remain.
 
 1. `proto/worker.proto` — finalise and generate Go + Python code first ✓
 2. `db/migrations/` — schema only ✓
@@ -275,7 +285,8 @@ Steps 1–6 are complete (proto, migrations, control-plane + worker skeletons, a
    GC match-ID query still pending (gated on live validation below)
 8. Worker Dota automation — headless launch, spectate command, camera follow
 9. Worker FFmpeg pipeline — x11grab → hevc_nvenc → SRT → mediamtx
-10. Frontend — Login, Friends, Watch pages, SteamGuardModal, WebSocket integration
+10. Frontend — Login, Friends, Watch pages, SteamGuardModal/AccountLink, WebSocket integration;
+    decision-logic unit tests (Vitest + MSW) ✓
 11. Docker Compose — wire all services, GPU config, volume strategy
 12. nginx + TLS — final external deployment
 
@@ -288,8 +299,9 @@ Before the worker spectate path (steps 7–9), validate the items in
 
 Test code that makes decisions; skip glue and stubs. `make test` runs Go (`make test-go`, real
 PostgreSQL via an ephemeral cluster) + Python (`make test-py`, `uv run pytest` under Python
-3.10). State machines, routing, serialization contracts, and crypto are the priorities. Full
-strategy and per-area coverage in [docs/testing.md](docs/testing.md).
+3.10) + frontend (`make test-fe`, Vitest + MSW). State machines, routing, serialization
+contracts, and crypto are the priorities. Full strategy and per-area coverage in
+[docs/testing.md](docs/testing.md).
 
 ---
 

@@ -11,7 +11,7 @@ regardless, and what makes them testable.
 
 ## Running
 
-`make test` → `make test-go` + `make test-py`.
+`make test` → `make test-go` + `make test-py` + `make test-fe`.
 
 - **Go (`make test-go`)** wraps the run in `scripts/with-test-db.sh`. DB-backed tests run
   against **real PostgreSQL**, not a mock — anything touching the DB (the `store` package and
@@ -22,6 +22,9 @@ regardless, and what makes them testable.
   existing instance; set `PG_BINDIR` if `initdb`/`pg_ctl` aren't on `PATH` (e.g. Debian).
 - **Python (`make test-py`)** runs `uv run pytest` in `worker/`. uv provisions Python 3.10 and
   the protobuf-3.20 deps (see [worker.md](worker.md)); no system Python 3.10 needed.
+- **Frontend (`make test-fe`)** runs `npm test` (Vitest) in `frontend/`, installing deps on
+  first run if `node_modules` is absent. No backend or browser required — the HTTP boundary is
+  mocked with MSW.
 
 ## Coverage by area
 
@@ -43,3 +46,14 @@ Worker (Python, `pytest`):
 - **Friends** (`steam_client.derive_status`, `agent` FriendsResult mapping + ListFriends
   routing): pure logic with a faked Steam session. The python-steam glue in
   `steam_client.SteamSession` is validated on-server, not unit-tested.
+
+Frontend (JS, Vitest + MSW):
+- **WS event routing** (`ws.routeEvent`): each event type classifies correctly and the
+  account- vs session-scoped `steam_guard`/`error` variants discriminate by which id is present;
+  unknown types are ignored, not thrown.
+- **API request contract** (`api.js`, MSW): each call hits the documented method/path with the
+  bearer header and correct JSON body; `getFriends` surfaces `409` (no account) and `502`
+  (worker) distinctly; the guard submit surfaces `404`/`409`. Fixtures mirror the CLAUDE.md
+  WS/REST shapes verbatim — the WS strings are the same JSON the Go WS-marshaling test asserts.
+- **Auth/status** (`auth.isAuthed`, `status.canSpectate`): pure predicates. The React render
+  trees, WHEP negotiation (`webrtc.js`), and the socket/`fetch` lifecycle are glue, not tested.
