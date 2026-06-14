@@ -6,14 +6,18 @@ on:
   pull_request:
     branches: [ master ]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   lint-go:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-go@v5
         with:
           go-version-file: control-plane/go.mod
+          cache-dependency-path: control-plane/go.sum
       - name: go vet
         working-directory: control-plane
         run: go vet ./...
@@ -24,7 +28,7 @@ jobs:
   lint-py:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v5
       - name: ruff check
         run: uvx ruff check worker/
@@ -46,10 +50,11 @@ jobs:
         ports:
           - 5432:5432
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-go@v5
         with:
           go-version-file: control-plane/go.mod
+          cache-dependency-path: control-plane/go.sum
       - name: Run Go tests
         working-directory: control-plane
         run: go test ./...
@@ -59,7 +64,7 @@ jobs:
   test-py:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v5
       - name: Run Python tests
         working-directory: worker
@@ -68,7 +73,7 @@ jobs:
   test-fe:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
