@@ -26,7 +26,9 @@ def make_dispatcher():
 
 def test_start_spectate_routes_with_payload():
     dispatcher, handlers = make_dispatcher()
-    cmd = pb.Command(start_spectate=pb.StartSpectate(session_id="s1", target_steam_id="76561"))
+    cmd = pb.Command(
+        start_spectate=pb.StartSpectate(session_id="s1", target_steam_id="76561")
+    )
 
     dispatcher.dispatch(cmd)
 
@@ -51,14 +53,18 @@ def test_steam_guard_routes_with_code():
 
 def test_list_friends_routes_with_request_id():
     dispatcher, handlers = make_dispatcher()
-    dispatcher.dispatch(pb.Command(list_friends=pb.ListFriends(request_id="req-1", steam_username="u")))
+    dispatcher.dispatch(
+        pb.Command(list_friends=pb.ListFriends(request_id="req-1", steam_username="u"))
+    )
     handlers["friends"].assert_called_once()
     assert handlers["friends"].call_args.args[0].request_id == "req-1"
 
 
 def test_link_account_routes_with_request_id():
     dispatcher, handlers = make_dispatcher()
-    dispatcher.dispatch(pb.Command(link_account=pb.LinkAccount(request_id="req-2", steam_username="u")))
+    dispatcher.dispatch(
+        pb.Command(link_account=pb.LinkAccount(request_id="req-2", steam_username="u"))
+    )
     handlers["link"].assert_called_once()
     assert handlers["link"].call_args.args[0].request_id == "req-2"
 

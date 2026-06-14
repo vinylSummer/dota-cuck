@@ -16,12 +16,12 @@ from steam_client import DOTA2_APP_ID, LoginError, SteamGuardRequired, derive_st
 @pytest.mark.parametrize(
     "persona_state,game_app_id,expected",
     [
-        (0, None, (False, False)),          # offline, no game
-        (0, DOTA2_APP_ID, (False, True)),   # in a Dota match while "offline"
-        (1, None, (True, False)),           # online, no game
-        (1, DOTA2_APP_ID, (True, True)),    # online, in a Dota match
-        (3, 730, (True, False)),            # online, in a different game
-        (1, 0, (True, False)),              # online, app id 0 is no game
+        (0, None, (False, False)),  # offline, no game
+        (0, DOTA2_APP_ID, (False, True)),  # in a Dota match while "offline"
+        (1, None, (True, False)),  # online, no game
+        (1, DOTA2_APP_ID, (True, True)),  # online, in a Dota match
+        (3, 730, (True, False)),  # online, in a different game
+        (1, 0, (True, False)),  # online, app id 0 is no game
     ],
 )
 def test_derive_status(persona_state, game_app_id, expected):
@@ -101,10 +101,14 @@ def make_agent(session):
 
 
 def test_list_friends_success_sends_friends_result():
-    session = FakeSession(result=("owner99", [{"steam_id": "1", "persona_name": "a", "online": True}]))
+    session = FakeSession(
+        result=("owner99", [{"steam_id": "1", "persona_name": "a", "online": True}])
+    )
     agent = make_agent(session)
 
-    agent._list_friends(pb.ListFriends(request_id="r", steam_username="u", steam_password="p"))
+    agent._list_friends(
+        pb.ListFriends(request_id="r", steam_username="u", steam_password="p")
+    )
 
     assert session.calls == [("u", "p", None)]
     [event] = agent._client.sent
@@ -119,7 +123,12 @@ def test_list_friends_passes_sentry():
     agent = make_agent(session)
 
     agent._list_friends(
-        pb.ListFriends(request_id="r", steam_username="u", steam_password="p", sentry_hash=b"\x01\x02")
+        pb.ListFriends(
+            request_id="r",
+            steam_username="u",
+            steam_password="p",
+            sentry_hash=b"\x01\x02",
+        )
     )
 
     assert session.calls[0][2] == "\x01\x02"
@@ -136,7 +145,9 @@ def test_list_friends_passes_sentry():
 def test_list_friends_failure_sends_error(exc, code):
     agent = make_agent(FakeSession(exc=exc))
 
-    agent._list_friends(pb.ListFriends(request_id="r", steam_username="u", steam_password="p"))
+    agent._list_friends(
+        pb.ListFriends(request_id="r", steam_username="u", steam_password="p")
+    )
 
     [event] = agent._client.sent
     assert event.friends_result.error.code == code

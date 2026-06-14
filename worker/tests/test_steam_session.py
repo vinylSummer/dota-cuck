@@ -111,7 +111,9 @@ def _run_link_in_thread(session):
 
 
 def test_link_mobile_guard_resumes_with_two_factor_code():
-    client = FakeClient([EResult.AccountLoginDeniedNeedTwoFactor, EResult.OK], steam_id=42)
+    client = FakeClient(
+        [EResult.AccountLoginDeniedNeedTwoFactor, EResult.OK], steam_id=42
+    )
     session = make_session(client)
 
     t, result, guards = _run_link_in_thread(session)
@@ -140,7 +142,11 @@ def test_link_email_guard_resumes_with_auth_code():
 
 def test_link_wrong_code_reprompts_then_succeeds():
     client = FakeClient(
-        [EResult.AccountLoginDeniedNeedTwoFactor, EResult.TwoFactorCodeMismatch, EResult.OK]
+        [
+            EResult.AccountLoginDeniedNeedTwoFactor,
+            EResult.TwoFactorCodeMismatch,
+            EResult.OK,
+        ]
     )
     session = make_session(client)
 

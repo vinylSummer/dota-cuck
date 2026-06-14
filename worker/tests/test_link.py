@@ -97,7 +97,9 @@ def test_link_account_success_sends_link_result():
     session = FakeSession(owner="76561198999")
     agent = make_agent(session)
 
-    agent._link_account(pb.LinkAccount(request_id="r", steam_username="u", steam_password="p"))
+    agent._link_account(
+        pb.LinkAccount(request_id="r", steam_username="u", steam_password="p")
+    )
 
     assert session.calls == [("u", "p")]
     [event] = agent._client.sent
@@ -109,7 +111,9 @@ def test_link_account_guard_then_success_sends_two_events():
     session = FakeSession(owner="owner1", guard_type="MOBILE")
     agent = make_agent(session)
 
-    agent._link_account(pb.LinkAccount(request_id="r", steam_username="u", steam_password="p"))
+    agent._link_account(
+        pb.LinkAccount(request_id="r", steam_username="u", steam_password="p")
+    )
 
     guard_ev, result_ev = agent._client.sent
     assert guard_ev.steam_guard.request_id == "r"
@@ -127,7 +131,9 @@ def test_link_account_guard_then_success_sends_two_events():
 def test_link_account_failure_sends_error(exc, code):
     agent = make_agent(FakeSession(exc=exc))
 
-    agent._link_account(pb.LinkAccount(request_id="r", steam_username="u", steam_password="p"))
+    agent._link_account(
+        pb.LinkAccount(request_id="r", steam_username="u", steam_password="p")
+    )
 
     [event] = agent._client.sent
     assert event.link_result.error.code == code

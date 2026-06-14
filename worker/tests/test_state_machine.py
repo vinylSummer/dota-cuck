@@ -22,9 +22,7 @@ def test_valid_transitions(current, event, expected):
 
 # Any (state, event) pair not in VALID must be rejected.
 _VALID_PAIRS = {(c, e) for c, e, _ in VALID}
-INVALID = [
-    (c, e) for c in State for e in Event if (c, e) not in _VALID_PAIRS
-]
+INVALID = [(c, e) for c in State for e in Event if (c, e) not in _VALID_PAIRS]
 
 
 @pytest.mark.parametrize("current,event", INVALID)
