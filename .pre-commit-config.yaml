@@ -1,0 +1,22 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.17
+    hooks:
+      - id: ruff
+        files: ^worker/
+        exclude: ^worker/gen/
+
+  - repo: local
+    hooks:
+      - id: go-fmt
+        name: gofmt
+        language: system
+        entry: gofmt -w
+        files: \.go$
+
+      - id: go-vet
+        name: go vet
+        language: system
+        entry: bash -c 'cd control-plane && go vet ./...'
+        pass_filenames: false
+        files: \.go$
