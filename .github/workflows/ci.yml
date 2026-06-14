@@ -31,7 +31,9 @@ jobs:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v5
       - name: ruff check
-        run: uvx ruff check worker/
+        run: uvx ruff check worker/ --exclude worker/gen
+      - name: ruff format
+        run: uvx ruff format --check worker/ --exclude worker/gen
 
   test-go:
     runs-on: ubuntu-latest
