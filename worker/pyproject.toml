@@ -20,6 +20,9 @@ dev = [
     "setuptools<81",         # grpc_tools.protoc imports pkg_resources (dropped in setuptools 81+)
 ]
 
+[tool.ruff]
+exclude = ["gen/"]
+
 [tool.pytest.ini_options]
 # Generated stubs import each other as `from spectator.v1 import ...`, so the
 # gen/ tree is its own import root.

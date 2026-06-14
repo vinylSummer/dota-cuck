@@ -1,6 +1,5 @@
 import pytest
 
-import state_machine as sm
 from state_machine import Event, InvalidTransition, State, next_state
 
 # Every defined edge: (from, event, to).
