@@ -78,7 +78,10 @@ def _classify_login(result) -> tuple[str, str | None]:
     if result == EResult.OK:
         return "ok", None
     # A required-or-mismatched mobile authenticator code → re-prompt MOBILE.
-    if result in (EResult.AccountLoginDeniedNeedTwoFactor, EResult.TwoFactorCodeMismatch):
+    if result in (
+        EResult.AccountLoginDeniedNeedTwoFactor,
+        EResult.TwoFactorCodeMismatch,
+    ):
         return "guard", "MOBILE"
     # A required-or-rejected emailed code → re-prompt EMAIL (Steam re-sends one).
     if result == EResult.AccountLogonDenied:
@@ -155,7 +158,9 @@ class SteamSession:
         for user in client.friends:
             persona_state = int(getattr(user, "state", 0) or 0)
             # game_played_app_id is set when the friend is in a game; absent otherwise.
-            played = user.get_ps("game_played_app_id") if hasattr(user, "get_ps") else None
+            played = (
+                user.get_ps("game_played_app_id") if hasattr(user, "get_ps") else None
+            )
             game_app_id = int(played) if played else None
             online, in_match = derive_status(persona_state, game_app_id)
             friends.append(
@@ -174,7 +179,9 @@ class SteamSession:
         self._login_interactive(client, username, password, on_guard)
         self._username = username
 
-    def _login_interactive(self, client, username: str, password: str, on_guard) -> None:
+    def _login_interactive(
+        self, client, username: str, password: str, on_guard
+    ) -> None:
         """Credential login, relying on the persisted sentry to skip the guard.
         When the guard still fires (first login on this machine, or sentry not
         yet trusted), pause: call ``on_guard`` and resume with the submitted

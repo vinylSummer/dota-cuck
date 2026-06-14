@@ -56,7 +56,9 @@ _GUARD_TYPE = {
 }
 
 
-def friends_ok_event(request_id: str, owner_steam_id: str, friends: list[dict]) -> pb.WorkerEvent:
+def friends_ok_event(
+    request_id: str, owner_steam_id: str, friends: list[dict]
+) -> pb.WorkerEvent:
     """Build a successful FriendsResult event from the session's (owner, friends)
     return. Pure, so the proto mapping is unit-tested."""
     return pb.WorkerEvent(
@@ -117,7 +119,9 @@ def steam_guard_event(request_id: str, guard_type: str) -> pb.WorkerEvent:
 
 
 class Agent:
-    def __init__(self, address: str, worker_id: str, steam_session: SteamSession | None = None) -> None:
+    def __init__(
+        self, address: str, worker_id: str, steam_session: SteamSession | None = None
+    ) -> None:
         self.state = sm.State.STOPPED
         self._steam = steam_session if steam_session is not None else SteamSession()
         dispatcher = CommandDispatcher(
@@ -137,12 +141,16 @@ class Agent:
             return
         log.info("state: %s --%s--> %s", self.state.name, event.name, new_state.name)
         self.state = new_state
-        self._client.send(pb.WorkerEvent(status_update=pb.StatusUpdate(state=_PROTO_STATE[new_state])))
+        self._client.send(
+            pb.WorkerEvent(status_update=pb.StatusUpdate(state=_PROTO_STATE[new_state]))
+        )
 
     # --- Command handlers (no-op stubs for the skeleton) ---
 
     def _on_start_spectate(self, cmd: pb.StartSpectate) -> None:
-        log.info("StartSpectate: session=%s target=%s", cmd.session_id, cmd.target_steam_id)
+        log.info(
+            "StartSpectate: session=%s target=%s", cmd.session_id, cmd.target_steam_id
+        )
         self._advance(sm.Event.START_SPECTATE)
 
     def _on_stop_spectate(self, _cmd: pb.StopSpectate) -> None:
@@ -168,7 +176,9 @@ class Agent:
             self._client.send(steam_guard_event(cmd.request_id, guard_type))
 
         try:
-            owner = self._steam.link(cmd.steam_username, cmd.steam_password, on_guard=on_guard)
+            owner = self._steam.link(
+                cmd.steam_username, cmd.steam_password, on_guard=on_guard
+            )
         except Exception as exc:  # noqa: BLE001 — any Steam/runtime failure becomes an error event
             log.warning("LinkAccount failed: %s", exc)
             event = link_error_event(cmd.request_id, exc)
@@ -179,15 +189,15 @@ class Agent:
     def _on_list_friends(self, cmd: pb.ListFriends) -> None:
         # Run off the command-stream thread so a slow Steam reply doesn't block
         # receiving further commands.
-        threading.Thread(
-            target=self._list_friends, args=(cmd,), daemon=True
-        ).start()
+        threading.Thread(target=self._list_friends, args=(cmd,), daemon=True).start()
 
     def _list_friends(self, cmd: pb.ListFriends) -> None:
         log.info("ListFriends: request=%s", cmd.request_id)
         sentry = cmd.sentry_hash.decode("latin-1") if cmd.sentry_hash else None
         try:
-            owner, friends = self._steam.list_friends(cmd.steam_username, cmd.steam_password, sentry)
+            owner, friends = self._steam.list_friends(
+                cmd.steam_username, cmd.steam_password, sentry
+            )
         except Exception as exc:  # noqa: BLE001 — any Steam/runtime failure becomes an error event
             log.warning("ListFriends failed: %s", exc)
             event = friends_error_event(cmd.request_id, exc)

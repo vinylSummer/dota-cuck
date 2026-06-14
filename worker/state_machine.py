@@ -33,11 +33,11 @@ class State(Enum):
 
 class Event(Enum):
     STREAM_CONNECTED = auto()  # gRPC stream up; worker ready to accept commands
-    START_SPECTATE = auto()    # StartSpectate command received
-    STREAM_STARTED = auto()    # spectate pipeline live (FFmpeg → mediamtx)
-    STOP_SPECTATE = auto()     # StopSpectate command received
-    FATAL_ERROR = auto()       # unrecoverable failure during STARTING/SPECTATING
-    CLEANUP_DONE = auto()      # STOPPING teardown finished
+    START_SPECTATE = auto()  # StartSpectate command received
+    STREAM_STARTED = auto()  # spectate pipeline live (FFmpeg → mediamtx)
+    STOP_SPECTATE = auto()  # StopSpectate command received
+    FATAL_ERROR = auto()  # unrecoverable failure during STARTING/SPECTATING
+    CLEANUP_DONE = auto()  # STOPPING teardown finished
 
 
 class InvalidTransition(Exception):

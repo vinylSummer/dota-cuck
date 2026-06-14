@@ -71,7 +71,9 @@ class GrpcClient:
     it. Received commands are passed to ``dispatcher``.
     """
 
-    def __init__(self, address: str, worker_id: str, dispatcher: CommandDispatcher) -> None:
+    def __init__(
+        self, address: str, worker_id: str, dispatcher: CommandDispatcher
+    ) -> None:
         self._address = address
         self._worker_id = worker_id
         self._dispatcher = dispatcher
@@ -97,7 +99,9 @@ class GrpcClient:
                 try:
                     self._dispatcher.dispatch(command)
                 except UnknownCommand:
-                    log.warning("ignoring unknown command: %s", command.WhichOneof("payload"))
+                    log.warning(
+                        "ignoring unknown command: %s", command.WhichOneof("payload")
+                    )
 
     def close(self) -> None:
         self._outbox.put(None)
