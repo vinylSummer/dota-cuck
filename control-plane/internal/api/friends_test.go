@@ -20,10 +20,10 @@ import (
 // gRPC). It records the credentials it was called with so tests can assert the
 // handler decrypted and passed them correctly.
 type fakeFriends struct {
-	result   *FriendList
-	err      error
-	gotUser  string
-	gotPass  string
+	result    *FriendList
+	err       error
+	gotUser   string
+	gotPass   string
 	gotSentry []byte
 }
 
