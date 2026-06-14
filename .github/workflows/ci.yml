@@ -10,26 +10,26 @@ jobs:
   lint-go:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v8
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version-file: control-plane/go.mod
           cache-dependency-path: control-plane/go.sum
-      - name: go vet
+      - name: Go vet
         working-directory: control-plane
         run: go vet ./...
-      - name: gofmt
+      - name: Gofmt
         working-directory: control-plane
         run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
 
   lint-py:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v8
-      - name: ruff check
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8.2.0
+      - name: Ruff check
         run: uvx ruff check worker/ --exclude worker/gen
-      - name: ruff format
+      - name: Ruff format
         run: uvx ruff format --check worker/ --exclude worker/gen
 
   test-go:
@@ -49,8 +49,8 @@ jobs:
         ports:
           - 5432:5432
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version-file: control-plane/go.mod
           cache-dependency-path: control-plane/go.sum
@@ -63,8 +63,8 @@ jobs:
   test-py:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v8
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8.2.0
       - name: Run Python tests
         working-directory: worker
         run: uv run pytest -q
@@ -72,7 +72,7 @@ jobs:
   test-fe:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
