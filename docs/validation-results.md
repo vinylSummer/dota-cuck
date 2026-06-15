@@ -11,7 +11,7 @@ containers). GPU host PCI address **0b:00.0** → Xorg **`PCI:11:0:0`**.
 | Item | What it proves | Status |
 |------|----------------|--------|
 | V1 Headless Xorg + NVIDIA GLX in Docker | Worker can render on a GPU-backed headless `:99` | ✅ PASS |
-| V2 Steam + Dota install via steamcmd | Dota installable into a named volume; update strategy | 🟡 in progress (install to /fard/steam) |
+| V2 Steam + Dota install via steamcmd | Dota installable into a named volume; update strategy | ✅ PASS (72G logical / 44G on ZFS, /fard/steam) |
 | V3 Match-ID resolution (python-steam rich presence) | Resolve a live match ID for a target steam_id | ✅ PASS (via rich presence, not GC) |
 | V4 Dual-session handoff + Steam Guard | python-steam→GUI Steam handoff guard behavior | ⏳ needs Steam creds |
 | V5 Dota spectate console command | Exact sequence to join a live match + follow camera | ⏳ needs Steam creds + Dota + live match |
@@ -125,7 +125,7 @@ V3 PASS: resolved live match id 29885347581173389
 
 ---
 
-## V2 — Steam + Dota install via steamcmd — 🟡 in progress
+## V2 — Steam + Dota install via steamcmd — ✅ PASS
 
 Probe: `scripts/validation/v2_install.sh`.
 
@@ -135,11 +135,16 @@ free)**, the intended `steam-data` location, plus `/poop` (1.5T). The install ta
 `/fard/steam/dota`. The worker `steam-data` volume (deployment.md) must be bound to
 `/fard/steam`, **not** under `/` or the Docker root on `/`.
 
-**Facts confirmed so far:**
-- Dota 2 (app 570) download size: **~68 GB** (73,179,594,568 bytes).
-- Download rate on this box ≈ **8.6 MB/s → ~2.3 h** full install. Plan the worker image/volume
-  so this runs **once into the persistent volume**, not per image build (validates the
-  deployment.md "install into a named volume" strategy).
+**Facts confirmed:**
+- `steamcmd +force_install_dir /fard/steam/dota +login … +app_update 570 validate +quit`
+  completed: `Success! App '570' fully installed.` (`appmanifest_570.acf` `StateFlags=4`).
+- **Size:** `SizeOnDisk` 72,376,742,563 (≈72 GB logical); the content VPKs (`game/dota/pak01_*.vpk`)
+  total ≈37 GB. On the ZFS dataset `fard/steam` (compression on, **1.65x**) it occupies **43.7 GB**
+  physical (`logicalused 72.4G` / `used 43.7G`).
+- The install is on the persistent ZFS dataset, so it **survives container rebuilds and host
+  reboots**. steamcmd downloads are **resumable** — re-running the same `+app_update 570` continues
+  from on-disk state. Validates the deployment.md "install once into a named volume" strategy:
+  bind the worker `steam-data` volume to `/fard/steam`, run the install once, never at image build.
 - **steamcmd login used Steam *Mobile Confirmation*, not a code** — Steam pushed an
   approve/reject prompt to the account's mobile device, which the operator accepted; steamcmd
   then proceeded (no code typed). This is **different from the python-steam friends/link flow**
@@ -151,9 +156,17 @@ free)**, the intended `steam-data` location, plus `/poop` (1.5T). The install ta
   real worker passes creds over gRPC (never argv); this is a harness-only artifact. Rotate the
   test-account password after validation.
 
-## V4 / V5 — blocked on V2
+## V4 / V5 — next (V2 done, now unblocked)
 
-V4 (dual-session handoff + Steam Guard) and V5 (Dota spectate console command) need Dota
-installed; they run after V2 completes. V5 also needs a *fresh* live match id at run time
-(re-run V3 — matches end in ~40 min).
+V4 (dual-session handoff + Steam Guard) and V5 (Dota spectate console command) are the
+exploratory items. Open questions to resolve live:
+- **GUI Steam vs steamcmd:** spectating needs the *Steam client* (not steamcmd) running so
+  Dota can authenticate. First GUI-Steam login likely needs a **mobile-confirmation tap**
+  (V2 finding) the headless worker can't perform — establish the GUI Steam sentry once with a
+  human, then confirm later logins are silent.
+- **Dual-session:** python-steam (friends/match-id) and GUI Steam can't both hold the account —
+  confirm the drop-friends-session → GUI-Steam handoff and whether a second guard fires.
+- **Spectate command (V5):** with Dota launched headless on `:99`, test the join-by-id console
+  flow (candidate `dota_spectate_game <WatchableGameID>`) + player-follow camera. Needs a
+  **fresh** live match id at run time (re-run the V3 probe).
 
