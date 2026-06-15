@@ -14,6 +14,7 @@ Detailed reference lives in `docs/`:
 [worker](docs/worker.md) ·
 [deployment](docs/deployment.md) ·
 [known-risks](docs/known-risks.md) ·
+[validation-results](docs/validation-results.md) ·
 [testing](docs/testing.md)
 
 ---
@@ -62,10 +63,18 @@ nginx (TLS termination, dota.example.com:443)        │
 
 ### Worker (Python)
 
-Single process (Python 3.10, protobuf-3.20 line, uv-managed) — it logs into Steam, queries the
-Game Coordinator, automates Dota on headless Xorg, and runs the FFmpeg pipeline. Keeps one
+Single process (Python 3.10, protobuf-3.20 line, uv-managed) — it logs into Steam, resolves the
+target's live match, automates Dota on headless Xorg, and runs the FFmpeg pipeline. Keeps one
 **warm in-process python-steam session** for friends, dropped while spectating. Full detail,
 including the protobuf/uv rationale and module map, in [docs/worker.md](docs/worker.md).
+
+**Match-ID resolution (validated 2026-06-15, not the GC):** the live match to spectate comes from
+the target friend's **Steam rich presence** key `WatchableGameID` (present and >0 only for live,
+watchable public matches), read from the **same warm python-steam session** that serves friends —
+`request_persona_state(ids, state_flags=… | 0x200)` then read `rich_presence['WatchableGameID']`.
+The Dota Game Coordinator (python-dota2) did **not** connect for a session not actively running
+the game, so the earlier "query the GC for the match ID" plan is dropped: **no `dota2` dependency
+is needed.** See [docs/validation-results.md](docs/validation-results.md) (V3).
 
 ### Friends Data Source (why not the Steam Web API)
 
@@ -205,8 +214,8 @@ Both are **pure transition functions** (`Next(cur, event) → (next, error)`), n
 handlers — see [docs/testing.md](docs/testing.md).
 
 **Worker:** `STOPPED → STARTING → IDLE`, then `IDLE → STARTING → SPECTATING → STOPPING → IDLE`.
-STARTING does python-steam login → GC match-ID query → GUI Steam login → Dota launch → match
-join → FFmpeg start. STOPPING tears those down. A Steam Guard interrupt during STARTING sends
+STARTING does python-steam login → match-ID resolution (rich-presence `WatchableGameID`) → GUI
+Steam login → Dota launch → match join → FFmpeg start. STOPPING tears those down. A Steam Guard interrupt during STARTING sends
 `SteamGuardRequired`, pauses login, waits for `SubmitSteamGuardCode`, then resumes.
 
 **Session (control plane):**
@@ -270,8 +279,11 @@ Kubernetes; PWA/mobile; AI-assisted crash recovery.
 ## Implementation Order
 
 Steps 1–6 are complete (proto, migrations, control-plane + worker skeletons, auth, friends);
-step 7 is done bar the GC match-ID query, and step 10 (frontend) is complete. Steps 8–9
-(worker spectate path) and 11–12 (deployment) remain.
+step 7 is done — match-ID resolution is validated (via rich presence, not the GC; see worker
+section) and folds into `steam_client.py`. Step 10 (frontend) is complete. Steps 8–9 (worker
+spectate path) and 11–12 (deployment) remain; their known-risks are being validated live on the
+server (see [docs/validation-results.md](docs/validation-results.md): V1 headless Xorg/NVIDIA and
+V6 NVENC pass; V2 Dota install + V4/V5 in progress).
 
 1. `proto/worker.proto` — finalise and generate Go + Python code first ✓
 2. `db/migrations/` — schema only ✓
@@ -280,9 +292,10 @@ step 7 is done bar the GC match-ID query, and step 10 (frontend) is complete. St
 5. Auth — register/login, Argon2id, JWT, AES-256-GCM credential storage ✓
 6. Friends — key cache, account linking, `ListFriends`/`FriendsResult`, worker-backed
    `/api/friends`, worker's warm python-steam friend listing ✓
-7. Worker Steam/GC — python-steam login (shared with friends), sentry establishment via
+7. Worker Steam — python-steam login (shared with friends), sentry establishment via
    `LinkAccount` + interactive Steam Guard at account link (sentry only, no `login_key`) ✓;
-   GC match-ID query still pending (gated on live validation below)
+   match-ID resolution validated via rich presence `WatchableGameID` (no GC, no `dota2` dep) ✓ —
+   wire it into `steam_client.py` on the warm session
 8. Worker Dota automation — headless launch, spectate command, camera follow
 9. Worker FFmpeg pipeline — x11grab → hevc_nvenc → SRT → mediamtx
 10. Frontend — Login, Friends, Watch pages, SteamGuardModal/AccountLink, WebSocket integration;
@@ -291,7 +304,8 @@ step 7 is done bar the GC match-ID query, and step 10 (frontend) is complete. St
 12. nginx + TLS — final external deployment
 
 Before the worker spectate path (steps 7–9), validate the items in
-[docs/known-risks.md](docs/known-risks.md) on the real server.
+[docs/known-risks.md](docs/known-risks.md) on the real server — results recorded in
+[docs/validation-results.md](docs/validation-results.md).
 
 ---
 
