@@ -1,0 +1,20 @@
+# mediamtx config for the spectator stream: SRT in from the worker's FFmpeg,
+# WebRTC out to the browser. V1 has a single path, live/match (see deployment.md).
+logLevel: info
+
+# HTTP control API (used by the V6 probe to confirm the stream is publishing, and
+# available to the control plane for health checks).
+api: yes
+apiAddress: :9997
+
+# SRT ingest from the worker. Publish with streamid=publish:live/match.
+srt: yes
+srtAddress: :8890
+
+# WebRTC egress to the browser (WHEP). nginx proxies /webrtc/* here in deployment.
+webrtc: yes
+webrtcAddress: :8889
+
+paths:
+  live/match:
+    source: publisher

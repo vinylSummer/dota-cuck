@@ -15,7 +15,7 @@ containers). GPU host PCI address **0b:00.0** → Xorg **`PCI:11:0:0`**.
 | V3 Match-ID resolution (python-steam rich presence) | Resolve a live match ID for a target steam_id | ✅ PASS (via rich presence, not GC) |
 | V4 Dual-session handoff + Steam Guard | python-steam→GUI Steam handoff guard behavior | ⏳ needs Steam creds |
 | V5 Dota spectate console command | Exact sequence to join a live match + follow camera | ⏳ needs Steam creds + Dota + live match |
-| V6 FFmpeg x11grab → hevc_nvenc → SRT → mediamtx | NVENC on headless Xorg; SRT path to mediamtx | 🟡 NVENC half ✅ PASS; SRT/browser leg pending |
+| V6 FFmpeg x11grab → hevc_nvenc → SRT → mediamtx | NVENC on headless Xorg; SRT path to mediamtx | ✅ PASS to mediamtx (browser WebRTC leg = human check) |
 
 ---
 
@@ -65,9 +65,25 @@ output bytes: 1439516
   fallback. The `video` driver capability (covered by `NVIDIA_DRIVER_CAPABILITIES=all`) is
   required for NVENC in the container.
 - The deployment.md FFmpeg arg set is correct as written; `ffmpeg.py` (step 9) can adopt it.
-- **Still pending (needs mediamtx up + a browser):** the SRT push to mediamtx
-  (`-f mpegts "srt://mediamtx:8890?streamid=live/match"`) and WebRTC playback in the browser —
-  see `scripts/validation/v6_srt_mediamtx.sh` (to be added).
+### V6 (SRT/mediamtx leg) — ✅ PASS
+
+Probe: `scripts/validation/v6_srt_mediamtx.sh` + [mediamtx config](../mediamtx/mediamtx.yml).
+Ran mediamtx, captured `:99`, NVENC-encoded, and pushed over SRT; mediamtx logged the
+publisher:
+```
+INF [path live/match] stream is available and online, 1 track (H265)
+INF [SRT] [conn 127.0.0.1:45327] is publishing to path 'live/match'
+```
+
+**Design implications / confirmed facts:**
+- The full **x11grab → hevc_nvenc → SRT → mediamtx** path works at real-time (speed ≈ 1.0x,
+  60fps, ~2.3 Mbps H.265). `ffmpeg.py` (step 9) can use this verbatim.
+- **The mediamtx SRT streamid must be `publish:live/match`** — deployment.md's bare
+  `streamid=live/match` is publish-ambiguous; fix the worker's SRT URL accordingly.
+- `mediamtx/mediamtx.yml` created (api on :9997, srt on :8890, webrtc/WHEP on :8889, single
+  path `live/match`). The container runs fine on the host network.
+- **Remaining (human-only):** open `https://<host>:8889/live/match` (WHEP) in a browser to
+  confirm the moving video renders. Everything up to mediamtx is proven.
 
 ---
 
