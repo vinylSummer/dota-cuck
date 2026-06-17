@@ -108,6 +108,14 @@ def link_error_event(request_id: str, exc: Exception) -> pb.WorkerEvent:
     )
 
 
+def match_id_resolved_event(match_id: int, steam_id: str) -> pb.WorkerEvent:
+    """Build a MatchIdResolved event. steam_id is the target being watched. Pure,
+    so the proto mapping is unit-tested."""
+    return pb.WorkerEvent(
+        match_id_resolved=pb.MatchIdResolved(match_id=match_id, steam_id=steam_id)
+    )
+
+
 def steam_guard_event(request_id: str, guard_type: str) -> pb.WorkerEvent:
     """Build a SteamGuardRequired event correlated to its login request."""
     return pb.WorkerEvent(
@@ -148,10 +156,44 @@ class Agent:
     # --- Command handlers (no-op stubs for the skeleton) ---
 
     def _on_start_spectate(self, cmd: pb.StartSpectate) -> None:
+        # Run off the command-stream thread: match-id resolution polls rich
+        # presence (and later C drives Dota/FFmpeg), so it must not stall the
+        # command receive loop.
+        threading.Thread(target=self._start_spectate, args=(cmd,), daemon=True).start()
+
+    def _start_spectate(self, cmd: pb.StartSpectate) -> None:
         log.info(
             "StartSpectate: session=%s target=%s", cmd.session_id, cmd.target_steam_id
         )
-        self._advance(sm.Event.START_SPECTATE)
+        self._advance(sm.Event.START_SPECTATE)  # IDLE → STARTING
+
+        # --- B: resolve the live watchable match id on the warm python-steam
+        # session (before the dual-session handoff to GUI Steam) ---
+        try:
+            match_id = self._steam.resolve_match_id(
+                cmd.target_steam_id, cmd.steam_username, cmd.steam_password
+            )
+        except Exception as exc:  # noqa: BLE001 — any Steam/runtime failure is fatal
+            log.warning("StartSpectate match-id resolve failed: %s", exc)
+            self._fail_spectate("MATCH_RESOLVE_FAILED", str(exc))
+            return
+        if not match_id:
+            self._fail_spectate(
+                "NO_WATCHABLE_MATCH", "target is not in a live watchable match"
+            )
+            return
+        log.info("StartSpectate: resolved match_id=%s", match_id)
+        self._client.send(match_id_resolved_event(match_id, cmd.target_steam_id))
+
+        # --- C continues here: logout python-steam, GUI Steam, Dota launch,
+        # spectate join + camera follow, FFmpeg, StreamStarted (step 9). ---
+
+    def _fail_spectate(self, code: str, message: str) -> None:
+        """Emit a fatal ErrorEvent and drive STARTING → STOPPING."""
+        self._client.send(
+            pb.WorkerEvent(error=pb.ErrorEvent(code=code, message=message, fatal=True))
+        )
+        self._advance(sm.Event.FATAL_ERROR)
 
     def _on_stop_spectate(self, _cmd: pb.StopSpectate) -> None:
         log.info("StopSpectate")

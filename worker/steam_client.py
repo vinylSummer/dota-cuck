@@ -28,6 +28,7 @@ server — see Known Risks in CLAUDE.md. The pure decision logic is
 from __future__ import annotations
 
 import threading
+import time
 
 # Steam app id for Dota 2. A friend whose currently-played game matches it is
 # treated as in a match.
@@ -38,6 +39,16 @@ PERSONA_STATE_OFFLINE = 0
 
 # How long a login waits for a Steam Guard code before giving up.
 GUARD_CODE_TIMEOUT_SECONDS = 300
+
+# Rich presence is not populated instantly after request_persona_state; poll a few
+# times (one second apart) before concluding the target has no watchable match.
+RICH_PRESENCE_POLLS = 10
+RICH_PRESENCE_POLL_INTERVAL_SECONDS = 1.0
+
+# request_persona_state flags: the usual presence/gameinfo set (0x35F) plus the
+# RichPresence bit (0x200), validated in scripts/validation/v3_gc_matchid.py.
+_PERSONA_PRESENCE_FLAGS = 0x35F
+_PERSONA_RICH_PRESENCE_FLAG = 0x200
 
 
 class SteamGuardRequired(Exception):
@@ -58,6 +69,20 @@ def derive_status(persona_state: int, game_app_id: int | None) -> tuple[bool, bo
     online = persona_state != PERSONA_STATE_OFFLINE
     in_match = game_app_id == DOTA2_APP_ID
     return online, in_match
+
+
+def extract_watchable_match_id(rich_presence: dict) -> int | None:
+    """Return the live, watchable match id from a friend's rich presence, or None.
+
+    ``WatchableGameID`` is present and > 0 only for a live, watchable public match;
+    it is absent or "0" otherwise (offline, in a party but not in a match, or a
+    private/unwatchable match). Pure, so the parsing is unit-tested."""
+    raw = (rich_presence or {}).get("WatchableGameID")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
 
 
 def _classify_login(result) -> tuple[str, str | None]:
@@ -172,6 +197,42 @@ class SteamSession:
                 }
             )
         return owner, friends
+
+    def resolve_match_id(
+        self, target_steam_id: str, username: str, password: str
+    ) -> int | None:
+        """Resolve the target friend's live watchable match id from rich presence.
+
+        Logs the warm session in if needed (the sentry skips the guard), then
+        requests the target's persona state with the RichPresence flag and polls
+        for ``WatchableGameID``. Returns ``None`` if the target is not in a live,
+        watchable, public match. Runs on the warm python-steam session, before the
+        dual-session handoff to GUI Steam.
+
+        The live python-steam calls are validated on-server; the pure parsing is
+        ``extract_watchable_match_id``."""
+        from steam.steamid import SteamID
+
+        client = self._ensure_client()
+        # No on_guard: by spectate time the account is linked (sentry established),
+        # so a guard challenge is unexpected and surfaces as SteamGuardRequired.
+        self._ensure_logged_in(client, username, password, on_guard=None)
+
+        target = SteamID(int(target_steam_id))
+        flags = _PERSONA_PRESENCE_FLAGS | _PERSONA_RICH_PRESENCE_FLAG
+        for _ in range(RICH_PRESENCE_POLLS):
+            try:
+                client.request_persona_state([target], state_flags=flags)
+            except TypeError:  # older python-steam signature without state_flags
+                client.request_persona_state([target])
+            user = client.get_user(target)
+            match_id = extract_watchable_match_id(
+                getattr(user, "rich_presence", {}) or {}
+            )
+            if match_id:
+                return match_id
+            time.sleep(RICH_PRESENCE_POLL_INTERVAL_SECONDS)
+        return None
 
     def _ensure_logged_in(self, client, username: str, password: str, on_guard) -> None:
         if getattr(client, "logged_on", False) and self._username == username:
