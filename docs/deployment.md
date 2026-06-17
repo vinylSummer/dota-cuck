@@ -16,8 +16,11 @@ Dota 2 (60 fps, 1280x720, headless Xorg :99, NVIDIA GPU)
 ffmpeg \
   -f x11grab -r 60 -s 1280x720 -i :99 \
   -c:v hevc_nvenc -preset p4 -b:v 4M \
-  -f mpegts "srt://mediamtx:8890?streamid=live/match"
+  -f mpegts "srt://mediamtx:8890?streamid=publish:live/match"
 ```
+
+The SRT `streamid` **must** be `publish:live/match` (the bare `live/match` is publish-ambiguous
+and mediamtx rejects it) — confirmed in V6 (see [validation-results.md](validation-results.md)).
 
 **Dota launch options:** `-novid -console -nosound` (adjust as needed for headless).
 
@@ -60,6 +63,11 @@ GPU rendering. The BusID must match the host PCI address (`nvidia-smi` or
 
 ## Steam + Dota install in Docker
 
-Dota 2 is ~70GB. Install via `steamcmd` during image build into a named Docker volume
-so it survives container rebuilds. Define an update strategy before writing the
-Dockerfile — it has large build-time implications.
+Dota 2 is ~70GB (≈72 GB logical; ~44 GB on the ZFS dataset with compression — V2). Install via
+`steamcmd` **once into the bound `steam-data` volume at runtime, never at image build** — Docker
+volumes aren't mounted during `build`, and V2 confirmed the install must target the persistent
+dataset so it survives container rebuilds and host reboots. On this server the volume binds to
+**`/fard/steam`** (the root fs is 98% full); `steamcmd +force_install_dir /fard/steam/dota …
++app_update 570 validate` is resumable. See V2 in [validation-results.md](validation-results.md).
+The worker image must run with `--gpus all` + `NVIDIA_DRIVER_CAPABILITIES=all` and must **not**
+install an NVIDIA driver package (the Container Toolkit injects the driver/GLX/NVENC libs — V1).

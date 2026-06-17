@@ -4,13 +4,16 @@ These must be confirmed on the actual server before writing the worker spectate 
 
 ## ⚠️ CRITICAL: Dual Steam session problem
 
-python-steam (GC queries / friends) and the GUI Steam client cannot both be logged into
+python-steam (match-ID resolution / friends) and the GUI Steam client cannot both be logged into
 the same account simultaneously — Steam terminates one session. Intended handoff:
 
 ```
-python-steam login → GC query (match ID for target_steam_id) → python-steam logout
-  → GUI Steam launch + login → Dota launch → spectate match_id
+python-steam login → resolve match ID (rich-presence WatchableGameID for target_steam_id)
+  → python-steam logout → GUI Steam launch + login → Dota launch → spectate match_id
 ```
+
+(Match-ID resolution is the warm session's rich presence, **not** a Game Coordinator query — see
+V3 in [validation-results.md](validation-results.md).)
 
 This is why the warm friends session is **dropped while spectating** and re-warmed after.
 

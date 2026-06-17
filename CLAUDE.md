@@ -279,11 +279,17 @@ Kubernetes; PWA/mobile; AI-assisted crash recovery.
 ## Implementation Order
 
 Steps 1–6 are complete (proto, migrations, control-plane + worker skeletons, auth, friends);
-step 7 is done — match-ID resolution is validated (via rich presence, not the GC; see worker
-section) and folds into `steam_client.py`. Step 10 (frontend) is complete. Steps 8–9 (worker
-spectate path) and 11–12 (deployment) remain; their known-risks are being validated live on the
-server (see [docs/validation-results.md](docs/validation-results.md): V1 headless Xorg/NVIDIA and
-V6 NVENC pass; V2 Dota install + V4/V5 in progress).
+step 7 is partially done — match-ID resolution is **validated** (via rich presence, not the GC;
+see worker section), but is **not yet wired into `steam_client.py`** (the warm session still has
+no `WatchableGameID` resolution). Step 10 (frontend) is complete. Steps 8–9 (worker spectate
+path) remain, as does their **control-plane counterpart** — the session lifecycle that drives
+them: the four `/api/sessions` handlers are still 501 stubs and the session state machine
+(`internal/sessions/state.go`, complete) is not yet wired to the HTTP handlers, worker
+`StreamStarted`/`StatusUpdate`/`ErrorEvent` events, or WS push. Steps 11–12 (deployment) remain
+and are greenfield (no `docker-compose.yml`, Dockerfiles, or `nginx.conf` yet). Known-risks are
+being validated live on the server (see [docs/validation-results.md](docs/validation-results.md):
+V1 headless Xorg/NVIDIA, V2 Dota install, V3 match-ID, and V6 NVENC/SRT all pass; **V4/V5
+(GUI-Steam handoff + Dota spectate command) remain — they need live Steam credentials**).
 
 1. `proto/worker.proto` — finalise and generate Go + Python code first ✓
 2. `db/migrations/` — schema only ✓

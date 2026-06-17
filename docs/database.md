@@ -40,7 +40,7 @@ CREATE TABLE sessions (
   worker_id        UUID   REFERENCES workers(id),
   steam_account_id UUID   REFERENCES steam_accounts(id),
   target_steam_id  TEXT   NOT NULL,          -- Steam ID of friend being spectated
-  match_id         BIGINT,                   -- resolved from GC; null until known
+  match_id         BIGINT,                   -- resolved from rich presence; null until known
   state            TEXT   NOT NULL DEFAULT 'OFF',
   webrtc_url       TEXT,
   started_at       TIMESTAMPTZ,
