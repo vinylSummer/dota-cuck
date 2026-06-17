@@ -1,0 +1,56 @@
+# Image for V4/V5 — extends the headless-GPU xtest base (Dockerfile.xtest) with the
+# Steam client + Dota launch toolchain. Like the base, it installs NO NVIDIA driver
+# package: nvidia_drv.so / GLX / NVENC are injected by the Container Toolkit at run
+# time (--gpus all -e NVIDIA_DRIVER_CAPABILITIES=all).
+#
+# Adds:
+#   - steamcmd            (CLI Steam; same login path V2 used)
+#   - steam-installer     (the GUI Steam client; bootstraps the real client on first run)
+#   - python3 + python-steam==1.4.4 (the warm-session login leg of V4, matching the worker)
+#   - xdotool             (drive the in-game Dota console headless on :99 in V5)
+#
+# Build (the runners do this for you):
+#   docker build -f scripts/validation/Dockerfile.xtest -t dota-xtest .
+#   docker build -f scripts/validation/Dockerfile.steam -t dota-steam .
+#
+# GUI Steam is i386 + non-free; first launch downloads the client and almost certainly
+# needs a one-time human mobile-confirmation tap (that's exactly what V4 characterizes).
+FROM dota-xtest
+
+# steamcmd + the GUI steam launcher install into /usr/games, which is not on the default
+# non-login PATH — add it so `steam` / `steamcmd` resolve in the probes' bash -c.
+ENV PATH="/usr/games:${PATH}"
+
+# Steam is 32-bit and lives in non-free. steamcmd + steam-installer both gate on an
+# interactive debconf license prompt that would hang a non-interactive build — pre-accept.
+ENV DEBIAN_FRONTEND=noninteractive
+RUN dpkg --add-architecture i386 \
+    && printf 'deb http://deb.debian.org/debian trixie main contrib non-free non-free-firmware\n' \
+       > /etc/apt/sources.list.d/nonfree.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends debconf-utils \
+    && echo "steam steam/question select I AGREE" | debconf-set-selections \
+    && echo "steam steam/license note ''" | debconf-set-selections \
+    && echo "steamcmd steam/question select I AGREE" | debconf-set-selections \
+    && echo "steamcmd steam/license note ''" | debconf-set-selections \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        steamcmd \
+        steam-installer \
+        libgl1:i386 \
+        libgl1-mesa-dri:i386 \
+        python3 \
+        python3-pip \
+        python3-venv \
+        xdotool \
+        wmctrl \
+        net-tools \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# python-steam pinned to the worker's line (protobuf-3.20 / Python 3.x). Installed into
+# a venv so it doesn't fight the system packages; the probes call /opt/steam-venv/bin/python.
+RUN python3 -m venv /opt/steam-venv \
+    && /opt/steam-venv/bin/pip install --no-cache-dir "steam[client]==1.4.4"
+
+CMD ["bash"]
