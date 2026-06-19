@@ -30,6 +30,15 @@ describe('routeEvent', () => {
     });
   });
 
+  it('maps steam_qr to challengeUrl (account-scoped)', () => {
+    expect(routeEvent(wsEvents.qrChallenge)).toEqual({
+      kind: 'steam_qr',
+      scope: 'account',
+      id: 'a1',
+      challengeUrl: 'https://s.team/q/ABCDEF',
+    });
+  });
+
   it('discriminates steam_guard by account_id vs session_id', () => {
     const acct = routeEvent(wsEvents.guardAccount);
     expect(acct).toMatchObject({ kind: 'steam_guard', scope: 'account', id: 'a1' });

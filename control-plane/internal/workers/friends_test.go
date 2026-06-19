@@ -48,7 +48,7 @@ func TestListFriendsRoundTrip(t *testing.T) {
 		})
 	}()
 
-	res, err := srv.ListFriends(ctx, "alice_dota", "s3cr3t", nil)
+	res, err := srv.ListFriends(ctx, "refresh-tok")
 	if err != nil {
 		t.Fatalf("ListFriends: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestListFriendsNoWorker(t *testing.T) {
 	_, _, srv := startServer(t)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	if _, err := srv.ListFriends(ctx, "u", "p", nil); err != ErrNoWorker {
+	if _, err := srv.ListFriends(ctx, "rt"); err != ErrNoWorker {
 		t.Fatalf("ListFriends with no worker = %v, want ErrNoWorker", err)
 	}
 }
@@ -87,7 +87,7 @@ func TestListFriendsTimeout(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	_, err = srv.ListFriends(ctx, "u", "p", nil) // worker never replies
+	_, err = srv.ListFriends(ctx, "rt") // worker never replies
 	if err != context.DeadlineExceeded {
 		t.Fatalf("ListFriends err = %v, want DeadlineExceeded", err)
 	}

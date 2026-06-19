@@ -68,7 +68,10 @@ export async function logout() {
 export async function listSteamAccounts() {
   return json(await request('GET', '/steam/accounts'));
 }
-export async function linkAccount(steamUsername, steamPassword) {
+// linkAccount starts a Steam link. With no arguments it starts a QR link (the
+// challenge URL arrives over the WebSocket); with a username + password it starts
+// the email-only / no-2FA credentials link.
+export async function linkAccount(steamUsername = '', steamPassword = '') {
   return json(
     await request('POST', '/steam/accounts', {
       steam_username: steamUsername,

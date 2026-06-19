@@ -45,9 +45,10 @@ func (p *pendingFriends) deliver(res *pb.FriendsResult) {
 }
 
 // ListFriends sends a ListFriends command to the connected worker and waits for
-// the correlated FriendsResult. Returns ErrNoWorker if none is connected, or
-// the context error on timeout/cancellation.
-func (s *Server) ListFriends(ctx context.Context, username, password string, sentry []byte) (*pb.FriendsResult, error) {
+// the correlated FriendsResult. The worker logs onto the CM with the refresh
+// token (decrypted in memory by the control plane). Returns ErrNoWorker if none
+// is connected, or the context error on timeout/cancellation.
+func (s *Server) ListFriends(ctx context.Context, refreshToken string) (*pb.FriendsResult, error) {
 	reqID, err := newRequestID()
 	if err != nil {
 		return nil, err
@@ -58,10 +59,8 @@ func (s *Server) ListFriends(ctx context.Context, username, password string, sen
 	defer s.pending.remove(reqID)
 
 	cmd := &pb.Command{Payload: &pb.Command_ListFriends{ListFriends: &pb.ListFriends{
-		RequestId:     reqID,
-		SteamUsername: username,
-		SteamPassword: password,
-		SentryHash:    sentry,
+		RequestId:    reqID,
+		RefreshToken: refreshToken,
 	}}}
 	if err := s.reg.Send(cmd); err != nil {
 		return nil, err

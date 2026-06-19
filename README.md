@@ -9,8 +9,9 @@ who's currently in a match, and watch their game as a low-latency WebRTC stream.
   Friends and in-match status are pulled from the worker's authenticated Steam session over a
   bidirectional gRPC stream. Steam passwords are encrypted at rest with a key derived from the user's login password 
   (never written to disk).
-- **Worker (Python)** — logs into Steam, queries the Game Coordinator, drives Dota on a headless
-  Xorg display, and runs the FFmpeg capture/encode pipeline.
+- **Worker (Python)** — logs into Steam, resolves the target's live match from Steam rich
+  presence (`WatchableGameID`, not the Game Coordinator), drives Dota on a headless Xorg display,
+  and runs the FFmpeg capture/encode pipeline.
 - **mediamtx** — ingests SRT from the worker, serves WebRTC (WHEP) to the browser.
 - **Frontend** — Vite + React SPA: login/register, friends list with Spectate buttons,
   fullscreen WebRTC watch page, and an interactive Steam Guard flow.

@@ -22,10 +22,13 @@ type LoginResponse struct {
 	Token string `json:"token" example:"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."`
 }
 
-// SteamAccountRequest is the body of POST /api/steam/accounts.
+// SteamAccountRequest is the body of POST /api/steam/accounts. Both fields are
+// optional: omit them for a QR link (the challenge URL is pushed over the
+// WebSocket); provide both for the email-only / no-2FA credentials link. The
+// password is used only for the Steam handshake and is never persisted.
 type SteamAccountRequest struct {
-	SteamUsername string `json:"steam_username" example:"alice_dota"`
-	SteamPassword string `json:"steam_password" example:"s3cr3t"`
+	SteamUsername string `json:"steam_username,omitempty" example:"alice_dota"`
+	SteamPassword string `json:"steam_password,omitempty" example:"s3cr3t"`
 }
 
 // SteamAccount is a linked Steam account as returned to the client. The Steam

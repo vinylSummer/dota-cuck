@@ -79,8 +79,8 @@ class FakeSession:
         self.exc = exc
         self.calls = []
 
-    def list_friends(self, username, password, sentry):
-        self.calls.append((username, password, sentry))
+    def list_friends(self, refresh_token):
+        self.calls.append(refresh_token)
         if self.exc:
             raise self.exc
         return self.result
@@ -106,32 +106,14 @@ def test_list_friends_success_sends_friends_result():
     )
     agent = make_agent(session)
 
-    agent._list_friends(
-        pb.ListFriends(request_id="r", steam_username="u", steam_password="p")
-    )
+    agent._list_friends(pb.ListFriends(request_id="r", refresh_token="rt"))
 
-    assert session.calls == [("u", "p", None)]
+    assert session.calls == ["rt"]
     [event] = agent._client.sent
     res = event.friends_result
     assert res.request_id == "r"
     assert res.owner_steam_id == "owner99"
     assert res.friends[0].steam_id == "1"
-
-
-def test_list_friends_passes_sentry():
-    session = FakeSession()
-    agent = make_agent(session)
-
-    agent._list_friends(
-        pb.ListFriends(
-            request_id="r",
-            steam_username="u",
-            steam_password="p",
-            sentry_hash=b"\x01\x02",
-        )
-    )
-
-    assert session.calls[0][2] == "\x01\x02"
 
 
 @pytest.mark.parametrize(
@@ -145,9 +127,7 @@ def test_list_friends_passes_sentry():
 def test_list_friends_failure_sends_error(exc, code):
     agent = make_agent(FakeSession(exc=exc))
 
-    agent._list_friends(
-        pb.ListFriends(request_id="r", steam_username="u", steam_password="p")
-    )
+    agent._list_friends(pb.ListFriends(request_id="r", refresh_token="rt"))
 
     [event] = agent._client.sent
     assert event.friends_result.error.code == code

@@ -148,8 +148,8 @@ type friendsProvider struct {
 	worker *workers.Server
 }
 
-func (f friendsProvider) ListFriends(ctx context.Context, username, password string, sentry []byte) (*api.FriendList, error) {
-	res, err := f.worker.ListFriends(ctx, username, password, sentry)
+func (f friendsProvider) ListFriends(ctx context.Context, refreshToken string) (*api.FriendList, error) {
+	res, err := f.worker.ListFriends(ctx, refreshToken)
 	if err != nil {
 		return nil, err
 	}
@@ -185,9 +185,10 @@ func (l linkProvider) StartLink(reqID, username, password string, cb api.LinkCal
 		ctx, cancel := context.WithTimeout(context.Background(), linkTimeout)
 		defer cancel()
 
-		res, err := l.worker.Link(ctx, reqID, username, password, func(gt pb.SteamGuardType) {
-			cb.OnGuard(guardTypeString(gt))
-		})
+		res, err := l.worker.Link(ctx, reqID, username, password,
+			func(gt pb.SteamGuardType) { cb.OnGuard(guardTypeString(gt)) },
+			func(url string) { cb.OnQrChallenge(url) },
+		)
 		if err != nil {
 			cb.OnError(err)
 			return
@@ -196,7 +197,7 @@ func (l linkProvider) StartLink(reqID, username, password string, cb api.LinkCal
 			cb.OnError(fmt.Errorf("%s: %s", e.GetCode(), e.GetMessage()))
 			return
 		}
-		cb.OnLinked(res.GetOwnerSteamId())
+		cb.OnLinked(res.GetOwnerSteamId(), res.GetRefreshToken())
 	}()
 }
 

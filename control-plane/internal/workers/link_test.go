@@ -55,7 +55,7 @@ func TestLinkRoundTripWithGuard(t *testing.T) {
 		_ = srv.SubmitGuardCode("req-link-1", "K4J9X")
 	}
 
-	res, err := srv.Link(ctx, "req-link-1", "alice_dota", "s3cr3t", onGuard)
+	res, err := srv.Link(ctx, "req-link-1", "alice_dota", "s3cr3t", onGuard, nil)
 	if err != nil {
 		t.Fatalf("Link: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestLinkNoWorker(t *testing.T) {
 	_, _, srv := startServer(t)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	if _, err := srv.Link(ctx, "req-x", "u", "p", nil); err != ErrNoWorker {
+	if _, err := srv.Link(ctx, "req-x", "u", "p", nil, nil); err != ErrNoWorker {
 		t.Fatalf("Link with no worker = %v, want ErrNoWorker", err)
 	}
 }

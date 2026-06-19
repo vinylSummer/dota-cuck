@@ -71,6 +71,9 @@ func (s *Server) handle(w *Worker, ev *pb.WorkerEvent) {
 		s.log.Info("steam guard required", "worker_id", w.ID,
 			"type", p.SteamGuard.GetGuardType(), "request_id", p.SteamGuard.GetRequestId())
 		s.links.guard(p.SteamGuard.GetRequestId(), p.SteamGuard.GetGuardType())
+	case *pb.WorkerEvent_QrChallenge:
+		s.log.Info("steam qr challenge", "worker_id", w.ID, "request_id", p.QrChallenge.GetRequestId())
+		s.links.challenge(p.QrChallenge.GetRequestId(), p.QrChallenge.GetChallengeUrl())
 	case *pb.WorkerEvent_MatchIdResolved:
 		s.log.Info("match id resolved", "worker_id", w.ID, "match_id", p.MatchIdResolved.GetMatchId())
 	case *pb.WorkerEvent_StreamStarted:

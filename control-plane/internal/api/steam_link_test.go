@@ -70,6 +70,10 @@ func newLinkServer(t *testing.T, fl LinkProvider) (*Server, *store.Store) {
 	return srv, st
 }
 
+// aRefreshToken is a syntactically valid (header.payload.signature) JWT whose
+// payload has no exp — enough for the link path, which only stores it encrypted.
+const aRefreshToken = "hdr.eyJzdWIiOiI3NjU2MTE5ODAwMDAwMDEyMyJ9.sig"
+
 func addAccount(t *testing.T, srv *Server, token string) string {
 	t.Helper()
 	rec := doAuthedJSON(t, srv.Router(), http.MethodPost, "/api/steam/accounts", token,
@@ -100,9 +104,12 @@ func TestAddSteamAccountStartsLink(t *testing.T) {
 	}
 }
 
-// A successful link backfills steam_id and clears the in-flight request.
-func TestAddSteamAccountLinkSuccessBackfillsSteamID(t *testing.T) {
-	fl := &fakeLinks{fire: func(_ string, cb LinkCallbacks) { cb.OnLinked("76561198000000123") }}
+// A successful link persists the encrypted refresh token, backfills steam_id,
+// and clears the in-flight request.
+func TestAddSteamAccountLinkSuccessPersistsRefreshToken(t *testing.T) {
+	fl := &fakeLinks{fire: func(_ string, cb LinkCallbacks) {
+		cb.OnLinked("76561198000000123", aRefreshToken)
+	}}
 	srv, st := newLinkServer(t, fl)
 	uid, token := registerAndToken(t, srv)
 
@@ -114,6 +121,21 @@ func TestAddSteamAccountLinkSuccessBackfillsSteamID(t *testing.T) {
 	}
 	if acct.SteamID != "76561198000000123" {
 		t.Errorf("steam_id = %q, want backfilled", acct.SteamID)
+	}
+	// The refresh token is stored encrypted and decrypts back with the cached key.
+	if len(acct.EncRefreshToken) == 0 {
+		t.Fatal("refresh token not persisted")
+	}
+	key, ok := srv.keys.Get(uid)
+	if !ok {
+		t.Fatal("expected cached key")
+	}
+	plain, err := auth.Decrypt(key, acct.EncRefreshToken, acct.EncRefreshNonce)
+	if err != nil {
+		t.Fatalf("Decrypt: %v", err)
+	}
+	if string(plain) != aRefreshToken {
+		t.Fatalf("decrypted = %q, want the refresh token", plain)
 	}
 	// The in-flight request is cleared, so a guard submission now 409s.
 	rec := doAuthedJSON(t, srv.Router(), http.MethodPost, "/api/steam/accounts/"+id+"/steamguard", token,

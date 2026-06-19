@@ -33,25 +33,32 @@ message WorkerEvent {
     ErrorEvent         error             = 7;
     FriendsResult      friends_result    = 8;
     LinkResult         link_result       = 9;
+    SteamQrChallenge   qr_challenge      = 10;
   }
 }
 
 message WorkerReady        {}
 message StatusUpdate       { WorkerState state = 1; }
-// request_id correlates the prompt with the login that raised it (LinkAccount /
-// ListFriends); empty for a session-driven spectate login in V1.
+// request_id correlates the prompt with the LinkAccount/ListFriends/StartSpectate
+// login that raised it; empty for a session-driven spectate login in V1.
 message SteamGuardRequired { SteamGuardType guard_type = 1; string request_id = 2; }
 message MatchIdResolved    { uint64 match_id = 1; string steam_id = 2; }
+// Emitted during a QR account link: the worker started an IAuthenticationService
+// QR session and the user must scan challenge_url with the Steam mobile app. A
+// rotated URL is sent as a fresh SteamQrChallenge with the same request_id.
+message SteamQrChallenge   { string request_id = 1; string challenge_url = 2; }
 message StreamStarted      { string srt_url = 1; }
 message ErrorEvent         { string code = 1; string message = 2; bool fatal = 3; }
 
 // Response to a LinkAccount command. Correlated by request_id. On success,
-// `owner_steam_id` is the account's own Steam ID (backfills steam_accounts);
-// on failure `error` is set.
+// `owner_steam_id` is the account's own Steam ID (backfills steam_accounts) and
+// `refresh_token` is the long-lived Steam refresh token the control plane
+// encrypts and persists for zero-interaction cold logins; on failure `error` is set.
 message LinkResult {
   string     request_id     = 1;
   string     owner_steam_id = 2;
   ErrorEvent error          = 3;
+  string     refresh_token  = 4;
 }
 
 // Response to a ListFriends command. Correlated by request_id. On failure,
@@ -83,32 +90,35 @@ message Command {
   }
 }
 
-// Standalone login to establish the worker's Steam Guard sentry and report the
-// account's own Steam ID, driving the interactive guard flow at account-link
-// time. The worker persists only the sentry, never the login_key. Replies with
-// LinkResult correlated by request_id.
+// Standalone login to acquire a Steam refresh token (modern auth model) and
+// report the account's own Steam ID, replying with LinkResult correlated by
+// request_id. Two acquisition modes:
+//   - QR (steam_username/steam_password empty): the worker opens an
+//     IAuthenticationService QR session and emits SteamQrChallenge events with
+//     the URL to scan; works for accounts with the Steam Mobile Authenticator.
+//   - Credentials (both set): for email-only / no-2FA accounts that can't scan
+//     a QR. The worker RSA-encrypts the password to Steam and, when an emailed
+//     code is required, drives the interactive Steam Guard flow. Credentials are
+//     decrypted in memory by the control plane and never persisted.
 message LinkAccount {
   string request_id     = 1;
-  string steam_username  = 2;       // decrypted in memory by control plane
-  string steam_password  = 3;
+  string steam_username  = 2;       // empty => QR mode
+  string steam_password  = 3;       // empty => QR mode
 }
 
 message StartSpectate {
   string session_id    = 1;
   string target_steam_id = 2;       // friend's Steam ID to spectate
-  string steam_username  = 3;       // credentials decrypted in memory by control plane
-  string steam_password  = 4;
-  bytes  sentry_hash     = 5;       // device trust token if available; empty on first login
+  string refresh_token   = 3;       // decrypted in memory by control plane
+  // reserved 4, 5;                  // was steam_password, sentry_hash
 }
 
 // Friends fetch. The worker serves this from its warm in-process python-steam
-// session, connecting lazily on the first call (credential login; the persisted
-// sentry suppresses the guard after account link), then replying FriendsResult.
+// session, logging onto the CM with the refresh token, then replying FriendsResult.
 message ListFriends {
   string request_id     = 1;        // correlates the FriendsResult reply
-  string steam_username  = 2;       // decrypted in memory by control plane
-  string steam_password  = 3;
-  bytes  sentry_hash     = 4;       // unused in V1 (worker owns its sentry on the volume)
+  string refresh_token   = 2;       // decrypted in memory by control plane
+  // reserved 3, 4;                  // was steam_password, sentry_hash
 }
 
 message StopSpectate         {}

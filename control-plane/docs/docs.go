@@ -366,6 +366,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "With no credentials, starts a QR link (the frontend renders the\nchallenge URL pushed over the WebSocket). With steam_username +\nsteam_password, starts the email-only / no-2FA credentials link.",
                 "consumes": [
                     "application/json"
                 ],
@@ -378,7 +379,7 @@ const docTemplate = `{
                 "summary": "Link a Steam account",
                 "parameters": [
                     {
-                        "description": "steam credentials",
+                        "description": "optional steam credentials",
                         "name": "body",
                         "in": "body",
                         "required": true,

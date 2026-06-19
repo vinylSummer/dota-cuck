@@ -21,16 +21,19 @@ and `make proto` invoke `uv run`. Pins: `protobuf==3.20.3`, `grpcio==1.48.2`,
 
 ## Responsibilities
 
-- Steam login: python-steam for GC queries + friends; GUI Steam for Dota automation. Set
-  `set_credential_location` so the **sentry** persists (Steam Guard device trust). **Sentry only —
-  the `login_key` is never persisted** (`new_login_key` is not handled): the login_key is a full
-  relogin secret, so cold logins re-send the password and rely on the sentry to skip the guard.
-- **Account link** (`LinkAccount` command → `LinkResult` event): a standalone login that
-  establishes the sentry and reports the account's `steam_id`. It drives the interactive Steam
-  Guard flow — `SteamSession.link` pauses on a guard challenge, the agent emits
-  `SteamGuardRequired` (correlated by `request_id`), and the worker resumes once
-  `SubmitSteamGuardCode` delivers a code (`submit_guard_code`). Resolving the guard here means
-  later friends/spectate logins reuse the sentry and don't re-prompt.
+- Steam login: python-steam for match-ID resolution + friends; GUI Steam for Dota automation. Cold
+  logins use the modern **refresh-token** model (`login_with_token`) — the worker logs onto the
+  CM by putting the refresh token in the logon `access_token` field, with **zero Steam Guard
+  interaction**. No sentry, no `login_key`; on token expiry/revocation the user re-links.
+- **Account link** (`LinkAccount` command → `LinkResult` event): a standalone
+  `IAuthenticationService` handshake that acquires the **refresh token** and reports the
+  account's `steam_id`. Two modes: **QR** (no credentials) opens a QR session and emits
+  `SteamQrChallenge` events carrying the URL to scan (rotated URLs reuse the `request_id`);
+  **credentials** (email-only / no-2FA accounts) RSA-encrypts the password to Steam and, when an
+  emailed code is required, drives the interactive Steam Guard flow — the agent emits
+  `SteamGuardRequired` (correlated by `request_id`) and resumes once `SubmitSteamGuardCode`
+  delivers a code (`submit_guard_code`). On success the worker returns the refresh token so the
+  control plane encrypts and persists it; later friends/spectate logins reuse it and don't re-prompt.
 - **Warm friends session** (`steam_client.SteamSession`): one in-process python-steam session,
   lazily connected on the first `ListFriends`, kept alive (logged on) between calls. Lists the
   logged-in account's friends with online + in-match status (`ListFriends` command →
@@ -38,16 +41,23 @@ and `make proto` invoke `uv run`. Pins: `protobuf==3.20.3`, `grpcio==1.48.2`,
   `steam_accounts.steam_id`. **Dropped while spectating** (GUI Steam needs the account — see the
   dual-session risk in [known-risks.md](known-risks.md)) and re-warmed lazily afterwards. The
   handler runs off the command-stream thread so a slow Steam reply doesn't block other commands.
-- Query the Dota 2 Game Coordinator for the live match ID of a target Steam ID.
+- Resolve the live match ID of a target Steam ID from the warm python-steam session's **rich
+  presence** (`request_persona_state(ids, state_flags=… | 0x200)` → `rich_presence['WatchableGameID']`).
+  Validated 2026-06-15: the Dota Game Coordinator (python-dota2) does **not** connect for a session
+  not running the game, so there is no GC query and **no `dota2` dependency** (see
+  [validation-results.md](validation-results.md) V3). Still to be wired into `steam_client.py`.
 - Launch and automate Dota 2 on headless Xorg (`DISPLAY=:99`); join in spectator mode; select
   player-follow camera via console commands.
 - Run the FFmpeg pipeline (see [deployment.md](deployment.md)).
-- Persist the sentry file after first login; report all state transitions and errors upstream.
+- Report all state transitions and errors upstream.
 
 ## Libraries
 
-`steam` (python-steam) + `dota2` (python-dota2) for GC; `grpcio` for the stream;
-`pyautogui` / `python-xlib` as a GUI-automation fallback if needed.
+`steam` (python-steam) for login, friends, and rich-presence match-ID resolution; `grpcio` for
+the stream; `pyautogui` / `python-xlib` as a GUI-automation fallback if needed. **No `dota2`
+(python-dota2) dependency** — the GC is not used for match-ID resolution (see V3 in
+[validation-results.md](validation-results.md)); keep it out of the worker deps unless the V5
+spectate join turns out to need it.
 
 ## Modules
 
@@ -56,7 +66,7 @@ and `make proto` invoke `uv run`. Pins: `protobuf==3.20.3`, `grpcio==1.48.2`,
 | `agent.py` | Entry point, state-machine driver, command handlers, Friends/Link/guard event mapping |
 | `grpc_client.py` | Bidirectional stream + `CommandDispatcher` (pure command routing) |
 | `state_machine.py` | Pure worker state-machine table |
-| `steam_client.py` | Warm python-steam session, sentry-only login + interactive Steam Guard, `derive_status` (GC match-ID still pending) |
+| `steam_client.py` | Warm python-steam session, refresh-token acquisition (QR/credentials handshake) + token CM login, interactive Steam Guard, `derive_status` (friends); rich-presence `WatchableGameID` match-ID resolution still to be added |
 | `dota_client.py` | GUI Dota automation — launch, join, camera (stub) |
 | `ffmpeg.py` | FFmpeg subprocess management (stub) |
 | `xorg/xorg.conf` | Headless NVIDIA display config (fill in BusID) |

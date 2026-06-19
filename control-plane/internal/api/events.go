@@ -10,10 +10,11 @@ type PushEvent struct {
 	AccountID string `json:"account_id,omitempty"`
 	State     string `json:"state,omitempty"`
 	GuardType string `json:"guard_type,omitempty"`
-	SteamID   string `json:"steam_id,omitempty"`
-	WebRTCURL string `json:"webrtc_url,omitempty"`
-	Code      string `json:"code,omitempty"`
-	Message   string `json:"message,omitempty"`
+	SteamID      string `json:"steam_id,omitempty"`
+	WebRTCURL    string `json:"webrtc_url,omitempty"`
+	ChallengeURL string `json:"challenge_url,omitempty"`
+	Code         string `json:"code,omitempty"`
+	Message      string `json:"message,omitempty"`
 }
 
 // SessionStateEvent: { "type": "session_state", "session_id": ..., "state": ... }
@@ -40,6 +41,13 @@ func ErrorEvent(sessionID, code, message string) PushEvent {
 // The link-time counterpart of SteamGuardEvent (account-scoped, not session).
 func AccountGuardEvent(accountID, guardType string) PushEvent {
 	return PushEvent{Type: "steam_guard", AccountID: accountID, GuardType: guardType}
+}
+
+// AccountQrEvent: { "type": "steam_qr", "account_id": ..., "challenge_url": ... }
+// Emitted during a QR account link with the URL the frontend renders as a QR
+// code; re-emitted with a fresh URL when Steam rotates the challenge.
+func AccountQrEvent(accountID, challengeURL string) PushEvent {
+	return PushEvent{Type: "steam_qr", AccountID: accountID, ChallengeURL: challengeURL}
 }
 
 // AccountLinkedEvent: { "type": "account_linked", "account_id": ..., "steam_id": ... }

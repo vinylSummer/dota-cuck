@@ -7,8 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	"github.com/vinylSummer/dota-cuck/internal/auth"
 )
 
 // registerAndToken registers a user and returns (userID, token). Registration
@@ -47,7 +45,10 @@ func doAuthedJSON(t *testing.T, h http.Handler, method, path, token string, body
 	return rec
 }
 
-func TestAddSteamAccountEncryptsAndPersists(t *testing.T) {
+// Linking creates the account row but persists no credentials: the Steam
+// password is never stored, and the refresh token is backfilled only once the
+// worker handshake completes (no worker is wired here, so it stays empty).
+func TestAddSteamAccountCreatesRowWithoutCredentials(t *testing.T) {
 	srv, st := newTestServer(t)
 	uid, token := registerAndToken(t, srv)
 
@@ -64,28 +65,28 @@ func TestAddSteamAccountEncryptsAndPersists(t *testing.T) {
 		t.Fatalf("unexpected DTO: %+v", dto)
 	}
 
-	// The stored password must be encrypted, and decrypt back with the cached key.
 	acct, err := st.SteamAccounts.GetByUserID(context.Background(), uid)
 	if err != nil {
 		t.Fatalf("GetByUserID: %v", err)
 	}
-	if string(acct.EncPassword) == "s3cr3t" {
-		t.Fatal("password stored in plaintext")
-	}
-	key, ok := srv.keys.Get(uid)
-	if !ok {
-		t.Fatal("expected cached key")
-	}
-	plain, err := auth.Decrypt(key, acct.EncPassword, acct.EncNonce)
-	if err != nil {
-		t.Fatalf("Decrypt: %v", err)
-	}
-	if string(plain) != "s3cr3t" {
-		t.Fatalf("decrypted = %q, want s3cr3t", plain)
+	if len(acct.EncRefreshToken) != 0 {
+		t.Fatal("refresh token persisted before the link completed")
 	}
 }
 
-func TestAddSteamAccountRejectsMissingFields(t *testing.T) {
+// A QR link sends no credentials at all and is accepted.
+func TestAddSteamAccountQrModeNoCredentials(t *testing.T) {
+	srv, _ := newTestServer(t)
+	_, token := registerAndToken(t, srv)
+	rec := doAuthedJSON(t, srv.Router(), http.MethodPost, "/api/steam/accounts", token,
+		SteamAccountRequest{})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body)
+	}
+}
+
+// A username without a password (or vice versa) is a malformed request.
+func TestAddSteamAccountRejectsPartialCredentials(t *testing.T) {
 	srv, _ := newTestServer(t)
 	_, token := registerAndToken(t, srv)
 	rec := doAuthedJSON(t, srv.Router(), http.MethodPost, "/api/steam/accounts", token,

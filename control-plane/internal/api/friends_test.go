@@ -17,18 +17,16 @@ import (
 )
 
 // fakeFriends is a stand-in FriendsProvider (the real one drives the worker over
-// gRPC). It records the credentials it was called with so tests can assert the
-// handler decrypted and passed them correctly.
+// gRPC). It records the refresh token it was called with so tests can assert the
+// handler decrypted and passed it correctly.
 type fakeFriends struct {
-	result    *FriendList
-	err       error
-	gotUser   string
-	gotPass   string
-	gotSentry []byte
+	result   *FriendList
+	err      error
+	gotToken string
 }
 
-func (f *fakeFriends) ListFriends(_ context.Context, username, password string, sentry []byte) (*FriendList, error) {
-	f.gotUser, f.gotPass, f.gotSentry = username, password, sentry
+func (f *fakeFriends) ListFriends(_ context.Context, refreshToken string) (*FriendList, error) {
+	f.gotToken = refreshToken
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -69,8 +67,9 @@ func newFriendsFixture(t *testing.T, ff *fakeFriends) *friendsFixture {
 }
 
 // seedUserWithSteam creates a user, caches a credential key, links a Steam
-// account with the password encrypted under that key, and returns (uid, token).
-func (f *friendsFixture) seedUserWithSteam(t *testing.T, steamPassword string) (string, string) {
+// account with the given refresh token encrypted under that key, and returns
+// (uid, token).
+func (f *friendsFixture) seedUserWithSteam(t *testing.T, refreshToken string) (string, string) {
 	t.Helper()
 	ctx := context.Background()
 	salt, _ := auth.NewSalt(auth.KDFSaltLen)
@@ -81,12 +80,17 @@ func (f *friendsFixture) seedUserWithSteam(t *testing.T, steamPassword string) (
 	key := auth.DeriveKey("login-pw", salt)
 	f.keys.Put(uid, key)
 
-	enc, nonce, err := auth.Encrypt(key, []byte(steamPassword))
+	id, err := f.store.SteamAccounts.Create(ctx, uid, "alice_dota")
+	if err != nil {
+		t.Fatalf("create steam account: %v", err)
+	}
+	enc, nonce, err := auth.Encrypt(key, []byte(refreshToken))
 	if err != nil {
 		t.Fatalf("encrypt: %v", err)
 	}
-	if _, err := f.store.SteamAccounts.Create(ctx, uid, "alice_dota", enc, nonce); err != nil {
-		t.Fatalf("create steam account: %v", err)
+	// steam_id left empty so the success test can assert the handler backfills it.
+	if err := f.store.SteamAccounts.SaveRefreshToken(ctx, id, "", "", enc, nonce, nil); err != nil {
+		t.Fatalf("save refresh token: %v", err)
 	}
 	token, err := f.srv.tokens.Issue(uid)
 	if err != nil {
@@ -128,7 +132,7 @@ func TestListFriendsSuccess(t *testing.T) {
 		},
 	}}
 	f := newFriendsFixture(t, ff)
-	uid, token := f.seedUserWithSteam(t, "s3cr3t")
+	uid, token := f.seedUserWithSteam(t, "refresh-tok-xyz")
 
 	rec := getFriends(t, f.srv, token)
 	if rec.Code != http.StatusOK {
@@ -146,9 +150,9 @@ func TestListFriendsSuccess(t *testing.T) {
 		t.Errorf("zoe should be online and in a match: %+v", friends[1])
 	}
 
-	// The handler must have decrypted the stored password and passed it through.
-	if ff.gotUser != "alice_dota" || ff.gotPass != "s3cr3t" {
-		t.Fatalf("provider got user=%q pass=%q, want alice_dota/s3cr3t", ff.gotUser, ff.gotPass)
+	// The handler must have decrypted the stored refresh token and passed it through.
+	if ff.gotToken != "refresh-tok-xyz" {
+		t.Fatalf("provider got token=%q, want refresh-tok-xyz", ff.gotToken)
 	}
 
 	// steam_id backfilled from owner_steam_id.
@@ -172,7 +176,7 @@ func TestListFriendsNoLinkedAccountIs409(t *testing.T) {
 
 func TestListFriendsWorkerErrorIs502(t *testing.T) {
 	f := newFriendsFixture(t, &fakeFriends{err: errors.New("no worker connected")})
-	_, token := f.seedUserWithSteam(t, "s3cr3t")
+	_, token := f.seedUserWithSteam(t, "refresh-tok-xyz")
 	rec := getFriends(t, f.srv, token)
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want 502", rec.Code)
@@ -182,7 +186,7 @@ func TestListFriendsWorkerErrorIs502(t *testing.T) {
 // A valid token but an empty key cache (e.g. after a server restart) is 401.
 func TestListFriendsMissingKeyIs401(t *testing.T) {
 	f := newFriendsFixture(t, &fakeFriends{result: &FriendList{}})
-	uid, token := f.seedUserWithSteam(t, "s3cr3t")
+	uid, token := f.seedUserWithSteam(t, "refresh-tok-xyz")
 	f.keys.Delete(uid)
 	rec := getFriends(t, f.srv, token)
 	if rec.Code != http.StatusUnauthorized {

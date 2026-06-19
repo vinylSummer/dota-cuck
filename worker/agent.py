@@ -90,10 +90,26 @@ def friends_error_event(request_id: str, exc: Exception) -> pb.WorkerEvent:
     )
 
 
-def link_ok_event(request_id: str, owner_steam_id: str) -> pb.WorkerEvent:
-    """Build a successful LinkResult event reporting the account's Steam ID."""
+def link_ok_event(
+    request_id: str, owner_steam_id: str, refresh_token: str
+) -> pb.WorkerEvent:
+    """Build a successful LinkResult event reporting the account's Steam ID and
+    the refresh token the control plane encrypts and persists."""
     return pb.WorkerEvent(
-        link_result=pb.LinkResult(request_id=request_id, owner_steam_id=owner_steam_id)
+        link_result=pb.LinkResult(
+            request_id=request_id,
+            owner_steam_id=owner_steam_id,
+            refresh_token=refresh_token,
+        )
+    )
+
+
+def qr_challenge_event(request_id: str, challenge_url: str) -> pb.WorkerEvent:
+    """Build a SteamQrChallenge event carrying the URL to render as a QR code."""
+    return pb.WorkerEvent(
+        qr_challenge=pb.SteamQrChallenge(
+            request_id=request_id, challenge_url=challenge_url
+        )
     )
 
 
@@ -171,7 +187,7 @@ class Agent:
         # session (before the dual-session handoff to GUI Steam) ---
         try:
             match_id = self._steam.resolve_match_id(
-                cmd.target_steam_id, cmd.steam_username, cmd.steam_password
+                cmd.target_steam_id, cmd.refresh_token
             )
         except Exception as exc:  # noqa: BLE001 — any Steam/runtime failure is fatal
             log.warning("StartSpectate match-id resolve failed: %s", exc)
@@ -211,21 +227,37 @@ class Agent:
         threading.Thread(target=self._link_account, args=(cmd,), daemon=True).start()
 
     def _link_account(self, cmd: pb.LinkAccount) -> None:
-        log.info("LinkAccount: request=%s user=%s", cmd.request_id, cmd.steam_username)
+        # Empty credentials => QR link (mobile-authenticator accounts); credentials
+        # present => the email-only / no-2FA fallback. Both yield a refresh token.
+        qr_mode = not cmd.steam_username and not cmd.steam_password
+        log.info(
+            "LinkAccount: request=%s mode=%s",
+            cmd.request_id,
+            "qr" if qr_mode else "credentials",
+        )
+
+        def on_challenge(url: str) -> None:
+            log.info("LinkAccount: qr challenge")
+            self._client.send(qr_challenge_event(cmd.request_id, url))
 
         def on_guard(guard_type: str) -> None:
             log.info("LinkAccount: steam guard required (%s)", guard_type)
             self._client.send(steam_guard_event(cmd.request_id, guard_type))
 
         try:
-            owner = self._steam.link(
-                cmd.steam_username, cmd.steam_password, on_guard=on_guard
-            )
+            if qr_mode:
+                owner, refresh_token = self._steam.begin_qr_link(
+                    on_challenge=on_challenge
+                )
+            else:
+                owner, refresh_token = self._steam.begin_credentials_link(
+                    cmd.steam_username, cmd.steam_password, on_guard=on_guard
+                )
         except Exception as exc:  # noqa: BLE001 — any Steam/runtime failure becomes an error event
             log.warning("LinkAccount failed: %s", exc)
             event = link_error_event(cmd.request_id, exc)
         else:
-            event = link_ok_event(cmd.request_id, owner)
+            event = link_ok_event(cmd.request_id, owner, refresh_token)
         self._client.send(event)
 
     def _on_list_friends(self, cmd: pb.ListFriends) -> None:
@@ -235,11 +267,8 @@ class Agent:
 
     def _list_friends(self, cmd: pb.ListFriends) -> None:
         log.info("ListFriends: request=%s", cmd.request_id)
-        sentry = cmd.sentry_hash.decode("latin-1") if cmd.sentry_hash else None
         try:
-            owner, friends = self._steam.list_friends(
-                cmd.steam_username, cmd.steam_password, sentry
-            )
+            owner, friends = self._steam.list_friends(cmd.refresh_token)
         except Exception as exc:  # noqa: BLE001 — any Steam/runtime failure becomes an error event
             log.warning("ListFriends failed: %s", exc)
             event = friends_error_event(cmd.request_id, exc)
