@@ -36,18 +36,24 @@ func (s *Server) ListFriends(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// An account whose link hasn't completed has no refresh token yet.
+	if len(account.EncRefreshToken) == 0 {
+		writeError(w, http.StatusConflict, "steam account link not complete")
+		return
+	}
+
 	key, ok := s.keys.Get(uid)
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "session expired, please log in again")
 		return
 	}
-	password, err := auth.Decrypt(key, account.EncPassword, account.EncNonce)
+	refreshToken, err := auth.Decrypt(key, account.EncRefreshToken, account.EncRefreshNonce)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not decrypt credentials")
 		return
 	}
 
-	list, err := s.friends.ListFriends(r.Context(), account.SteamUsername, string(password), account.SentryHash)
+	list, err := s.friends.ListFriends(r.Context(), string(refreshToken))
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "could not fetch friends")
 		return

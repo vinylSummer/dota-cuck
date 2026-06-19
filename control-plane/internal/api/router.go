@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -23,9 +24,10 @@ type UserStore interface {
 
 // SteamAccountStore is the slice of steam-account persistence the handlers need.
 type SteamAccountStore interface {
-	Create(ctx context.Context, userID, steamUsername string, encPassword, encNonce []byte) (string, error)
+	Create(ctx context.Context, userID, steamUsername string) (string, error)
 	GetByUserID(ctx context.Context, userID string) (*store.SteamAccount, error)
 	SetSteamID(ctx context.Context, id, steamID string) error
+	SaveRefreshToken(ctx context.Context, id, steamID, steamUsername string, encToken, encNonce []byte, expires *time.Time) error
 	Delete(ctx context.Context, userID, id string) error
 }
 
@@ -44,25 +46,29 @@ type FriendList struct {
 	Friends      []FriendStatus
 }
 
-// FriendsProvider fetches friends for a set of Steam credentials. The concrete
-// implementation drives the worker over gRPC (an authenticated Steam session).
+// FriendsProvider fetches friends using a Steam refresh token (decrypted in
+// memory by the control plane). The concrete implementation drives the worker
+// over gRPC (an authenticated Steam session).
 type FriendsProvider interface {
-	ListFriends(ctx context.Context, username, password string, sentry []byte) (*FriendList, error)
+	ListFriends(ctx context.Context, refreshToken string) (*FriendList, error)
 }
 
-// LinkCallbacks receive the asynchronous outcome of a StartLink. OnGuard may
-// fire before the terminal callback; then exactly one of OnLinked / OnError is
-// called. They may run on a different goroutine than StartLink's caller.
+// LinkCallbacks receive the asynchronous outcome of a StartLink. OnQrChallenge
+// (QR path) or OnGuard (credentials path) may fire before the terminal
+// callback; then exactly one of OnLinked / OnError is called. They may run on a
+// different goroutine than StartLink's caller.
 type LinkCallbacks struct {
-	OnGuard  func(guardType string)
-	OnLinked func(ownerSteamID string)
-	OnError  func(err error)
+	OnQrChallenge func(challengeURL string)
+	OnGuard       func(guardType string)
+	OnLinked      func(ownerSteamID, refreshToken string)
+	OnError       func(err error)
 }
 
-// LinkProvider drives a worker login to establish the Steam Guard sentry and
-// report the account's Steam ID. StartLink returns immediately; the result
-// arrives via callbacks (the worker login can block on an interactive Steam
-// Guard prompt). SubmitGuardCode relays a code to the in-flight login by
+// LinkProvider drives a worker login to acquire a Steam refresh token and report
+// the account's Steam ID. Empty username/password starts a QR link (OnQrChallenge
+// receives the URL); credentials start the email/no-2FA path (OnGuard fires when
+// a code is required). StartLink returns immediately; the result arrives via
+// callbacks. SubmitGuardCode relays a code to the in-flight credentials login by
 // request id. The concrete implementation drives the worker over gRPC.
 type LinkProvider interface {
 	StartLink(reqID, username, password string, cb LinkCallbacks)

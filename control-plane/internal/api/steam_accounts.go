@@ -2,8 +2,11 @@ package api
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -11,16 +14,22 @@ import (
 	"github.com/vinylSummer/dota-cuck/internal/store"
 )
 
-// Steam account management: link, list, remove. The Steam password is encrypted
-// at link time with the user's cached credential key and never returned.
+// Steam account management: link, list, remove. Auth uses the modern
+// refresh-token model — account link acquires a Steam refresh token, which is
+// encrypted at rest with the user's cached credential key. The Steam password
+// (credentials fallback) is forwarded to the worker for the handshake but never
+// persisted; it is never returned.
 
 // AddSteamAccount godoc
 // @Summary      Link a Steam account
+// @Description  With no credentials, starts a QR link (the frontend renders the
+// @Description  challenge URL pushed over the WebSocket). With steam_username +
+// @Description  steam_password, starts the email-only / no-2FA credentials link.
 // @Tags         steam
 // @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Param        body  body      SteamAccountRequest  true  "steam credentials"
+// @Param        body  body      SteamAccountRequest  true  "optional steam credentials"
 // @Success      201   {object}  SteamAccount
 // @Failure      400   {object}  ErrorResponse
 // @Failure      401   {object}  ErrorResponse
@@ -38,24 +47,23 @@ func (s *Server) AddSteamAccount(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.SteamUsername == "" || req.SteamPassword == "" {
-		writeError(w, http.StatusBadRequest, "steam_username and steam_password are required")
+	// QR mode = no credentials; credentials mode = both present. A username with
+	// no password (or vice versa) is a malformed request.
+	if (req.SteamUsername == "") != (req.SteamPassword == "") {
+		writeError(w, http.StatusBadRequest, "steam_username and steam_password must be provided together")
 		return
 	}
 
+	// The cached key encrypts the refresh token at link completion. Captured now
+	// (not looked up later) because the link can outlive the cache TTL.
 	key, ok := s.keys.Get(uid)
 	if !ok {
 		// Valid token but no cached key (e.g. server restarted). Re-login repopulates it.
 		writeError(w, http.StatusUnauthorized, "session expired, please log in again")
 		return
 	}
-	encPassword, encNonce, err := auth.Encrypt(key, []byte(req.SteamPassword))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not encrypt credentials")
-		return
-	}
 
-	id, err := s.steamAccounts.Create(r.Context(), uid, req.SteamUsername, encPassword, encNonce)
+	id, err := s.steamAccounts.Create(r.Context(), uid, req.SteamUsername)
 	if errors.Is(err, store.ErrSteamAccountExists) {
 		writeError(w, http.StatusConflict, "a steam account is already linked")
 		return
@@ -65,10 +73,11 @@ func (s *Server) AddSteamAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Kick off the worker login that establishes the Steam Guard sentry and
-	// reports the account's Steam ID. It runs asynchronously because it may pause
-	// on an interactive Steam Guard prompt; progress is pushed over the WebSocket.
-	s.startAccountLink(id, req.SteamUsername, req.SteamPassword)
+	// Kick off the worker handshake that acquires the refresh token and reports
+	// the account's Steam ID. It runs asynchronously because it waits on the user
+	// (scanning the QR or submitting an emailed code); progress — the QR
+	// challenge, any guard prompt, and the terminal result — is pushed over WS.
+	s.startAccountLink(id, req.SteamUsername, req.SteamPassword, key)
 
 	writeJSON(w, http.StatusCreated, SteamAccount{
 		ID:            id,
@@ -76,24 +85,28 @@ func (s *Server) AddSteamAccount(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// startAccountLink begins the worker login for a freshly linked account and
-// wires its asynchronous outcome to the WebSocket hub and the steam_id backfill.
-func (s *Server) startAccountLink(accountID, username, password string) {
+// startAccountLink begins the worker handshake for a freshly linked account and
+// wires its asynchronous outcome to the WebSocket hub and the refresh-token
+// backfill. key encrypts the refresh token at completion.
+func (s *Server) startAccountLink(accountID, username, password string, key []byte) {
 	if s.links == nil {
 		return
 	}
 	reqID := newRequestID()
 	s.setLinkReq(accountID, reqID)
 	s.links.StartLink(reqID, username, password, LinkCallbacks{
+		OnQrChallenge: func(challengeURL string) {
+			s.hub.Broadcast(context.Background(), AccountQrEvent(accountID, challengeURL))
+		},
 		OnGuard: func(guardType string) {
 			s.hub.Broadcast(context.Background(), AccountGuardEvent(accountID, guardType))
 		},
-		OnLinked: func(ownerSteamID string) {
+		OnLinked: func(ownerSteamID, refreshToken string) {
 			s.clearLinkReq(accountID)
-			if ownerSteamID != "" {
-				if err := s.steamAccounts.SetSteamID(context.Background(), accountID, ownerSteamID); err != nil {
-					s.hub.log.Warn("backfill steam_id failed", "account_id", accountID, "err", err)
-				}
+			if err := s.persistRefreshToken(accountID, ownerSteamID, refreshToken, key); err != nil {
+				s.hub.log.Warn("persist refresh token failed", "account_id", accountID, "err", err)
+				s.hub.Broadcast(context.Background(), AccountErrorEvent(accountID, "LINK_FAILED", "could not store refresh token"))
+				return
 			}
 			s.hub.Broadcast(context.Background(), AccountLinkedEvent(accountID, ownerSteamID))
 		},
@@ -102,6 +115,54 @@ func (s *Server) startAccountLink(accountID, username, password string) {
 			s.hub.Broadcast(context.Background(), AccountErrorEvent(accountID, "LINK_FAILED", err.Error()))
 		},
 	})
+}
+
+// persistRefreshToken encrypts the refresh token with the user-derived key and
+// saves it alongside the account's Steam ID and the token's expiry (from its JWT
+// `exp`). The plaintext token is held only transiently here.
+func (s *Server) persistRefreshToken(accountID, ownerSteamID, refreshToken string, key []byte) error {
+	encToken, encNonce, err := auth.Encrypt(key, []byte(refreshToken))
+	if err != nil {
+		return err
+	}
+	return s.steamAccounts.SaveRefreshToken(
+		context.Background(), accountID, ownerSteamID, "", encToken, encNonce, expiryFromJWT(refreshToken),
+	)
+}
+
+// expiryFromJWT reads the `exp` (Unix seconds) claim from a Steam token JWT and
+// returns it as a time, or nil if the token is malformed or has no expiry. The
+// signature is not verified — this is only a hint for proactive re-prompting.
+func expiryFromJWT(token string) *time.Time {
+	parts := splitJWT(token)
+	if len(parts) < 2 {
+		return nil
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return nil
+	}
+	var claims struct {
+		Exp int64 `json:"exp"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil || claims.Exp == 0 {
+		return nil
+	}
+	t := time.Unix(claims.Exp, 0).UTC()
+	return &t
+}
+
+// splitJWT splits a compact JWT into its dot-separated segments.
+func splitJWT(token string) []string {
+	var parts []string
+	start := 0
+	for i := 0; i < len(token); i++ {
+		if token[i] == '.' {
+			parts = append(parts, token[start:i])
+			start = i + 1
+		}
+	}
+	return append(parts, token[start:])
 }
 
 // SubmitAccountSteamGuard godoc

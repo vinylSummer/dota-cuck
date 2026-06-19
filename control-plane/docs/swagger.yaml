@@ -335,8 +335,12 @@ paths:
     post:
       consumes:
       - application/json
+      description: |-
+        With no credentials, starts a QR link (the frontend renders the
+        challenge URL pushed over the WebSocket). With steam_username +
+        steam_password, starts the email-only / no-2FA credentials link.
       parameters:
-      - description: steam credentials
+      - description: optional steam credentials
         in: body
         name: body
         required: true

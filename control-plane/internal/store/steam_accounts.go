@@ -16,18 +16,20 @@ var (
 	ErrSteamAccountNotFound = errors.New("store: steam account not found")
 )
 
-// SteamAccount is a linked Steam account row. The password is stored encrypted
-// (enc_password + enc_nonce); plaintext never touches the database. SteamID is
-// empty until backfilled from the worker's first login.
+// SteamAccount is a linked Steam account row. Auth uses the modern refresh-token
+// model: the account's Steam refresh token is stored encrypted
+// (enc_refresh_token + enc_refresh_nonce) — never the password, never a sentry.
+// SteamID, SteamUsername, the token, and its expiry are all unknown at link
+// creation time and backfilled once the worker completes the handshake.
 type SteamAccount struct {
-	ID            string
-	UserID        string
-	SteamID       string
-	SteamUsername string
-	EncPassword   []byte
-	EncNonce      []byte
-	SentryHash    []byte
-	CreatedAt     time.Time
+	ID                  string
+	UserID              string
+	SteamID             string
+	SteamUsername       string
+	EncRefreshToken     []byte
+	EncRefreshNonce     []byte
+	RefreshTokenExpires *time.Time
+	CreatedAt           time.Time
 }
 
 // SteamAccountStore is the steam_accounts-table data access.
@@ -35,16 +37,22 @@ type SteamAccountStore struct {
 	pool *pgxpool.Pool
 }
 
-// Create links a Steam account to a user, storing the encrypted credentials.
-// steam_id is left null and backfilled later via SetSteamID. V1 allows one
-// account per user; a second returns ErrSteamAccountExists.
-func (s *SteamAccountStore) Create(ctx context.Context, userID, steamUsername string, encPassword, encNonce []byte) (string, error) {
+// Create links a Steam account to a user. The row starts with no credentials;
+// the refresh token, steam_id, and (for a QR link) the username are backfilled
+// by SaveRefreshToken once the worker handshake completes. steamUsername may be
+// empty (QR mode). V1 allows one account per user; a second returns
+// ErrSteamAccountExists.
+func (s *SteamAccountStore) Create(ctx context.Context, userID, steamUsername string) (string, error) {
 	const q = `
-		INSERT INTO steam_accounts (user_id, steam_username, enc_password, enc_nonce)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO steam_accounts (user_id, steam_username)
+		VALUES ($1, $2)
 		RETURNING id`
+	var username *string
+	if steamUsername != "" {
+		username = &steamUsername
+	}
 	var id string
-	err := s.pool.QueryRow(ctx, q, userID, steamUsername, encPassword, encNonce).Scan(&id)
+	err := s.pool.QueryRow(ctx, q, userID, username).Scan(&id)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
@@ -55,7 +63,31 @@ func (s *SteamAccountStore) Create(ctx context.Context, userID, steamUsername st
 	return id, nil
 }
 
-// SetSteamID backfills the account's SteamID64 once the worker reports it.
+// SaveRefreshToken backfills the account with the outcome of a completed link:
+// the encrypted refresh token (+ nonce), its expiry, the account's SteamID64,
+// and — for a QR link where it was unknown up front — the resolved username.
+// A nil expires or empty steamUsername leaves that column unchanged-as-null.
+func (s *SteamAccountStore) SaveRefreshToken(ctx context.Context, id, steamID, steamUsername string, encToken, encNonce []byte, expires *time.Time) error {
+	const q = `
+		UPDATE steam_accounts
+		SET enc_refresh_token = $2,
+		    enc_refresh_nonce = $3,
+		    refresh_token_expires = $4,
+		    steam_id = $5,
+		    steam_username = COALESCE(NULLIF($6, ''), steam_username)
+		WHERE id = $1`
+	tag, err := s.pool.Exec(ctx, q, id, encToken, encNonce, expires, steamID, steamUsername)
+	if err != nil {
+		return fmt.Errorf("store: save refresh token: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrSteamAccountNotFound
+	}
+	return nil
+}
+
+// SetSteamID backfills the account's SteamID64 once the worker reports it (e.g.
+// from a friends login when it wasn't captured at link time).
 func (s *SteamAccountStore) SetSteamID(ctx context.Context, id, steamID string) error {
 	const q = `UPDATE steam_accounts SET steam_id = $2 WHERE id = $1`
 	tag, err := s.pool.Exec(ctx, q, id, steamID)
@@ -85,14 +117,15 @@ func (s *SteamAccountStore) Delete(ctx context.Context, userID, id string) error
 // GetByUserID returns the user's linked Steam account, or ErrSteamAccountNotFound.
 func (s *SteamAccountStore) GetByUserID(ctx context.Context, userID string) (*SteamAccount, error) {
 	const q = `
-		SELECT id, user_id, steam_id, steam_username, enc_password, enc_nonce, sentry_hash, created_at
+		SELECT id, user_id, steam_id, steam_username,
+		       enc_refresh_token, enc_refresh_nonce, refresh_token_expires, created_at
 		FROM steam_accounts
 		WHERE user_id = $1`
 	var a SteamAccount
-	var steamID *string // nullable until backfilled
+	var steamID, steamUsername *string // nullable until backfilled
 	err := s.pool.QueryRow(ctx, q, userID).Scan(
-		&a.ID, &a.UserID, &steamID, &a.SteamUsername,
-		&a.EncPassword, &a.EncNonce, &a.SentryHash, &a.CreatedAt,
+		&a.ID, &a.UserID, &steamID, &steamUsername,
+		&a.EncRefreshToken, &a.EncRefreshNonce, &a.RefreshTokenExpires, &a.CreatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -102,6 +135,9 @@ func (s *SteamAccountStore) GetByUserID(ctx context.Context, userID string) (*St
 	}
 	if steamID != nil {
 		a.SteamID = *steamID
+	}
+	if steamUsername != nil {
+		a.SteamUsername = *steamUsername
 	}
 	return &a, nil
 }
