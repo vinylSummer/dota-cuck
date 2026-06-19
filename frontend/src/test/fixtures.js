@@ -9,6 +9,7 @@ export const wsEvents = {
   guardSession: { type: 'steam_guard', session_id: 's1', guard_type: 'EMAIL' },
   guardAccount: { type: 'steam_guard', account_id: 'a1', guard_type: 'EMAIL' },
   accountLinked: { type: 'account_linked', account_id: 'a1', steam_id: '76561198000000000' },
+  qrChallenge: { type: 'steam_qr', account_id: 'a1', challenge_url: 'https://s.team/q/ABCDEF' },
   streamReady: {
     type: 'stream_ready',
     session_id: 's1',

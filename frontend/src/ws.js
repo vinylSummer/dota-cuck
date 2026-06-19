@@ -14,6 +14,8 @@ export function routeEvent(ev) {
       return { kind: 'stream_ready', scope: 'session', id: ev.session_id, webrtcUrl: ev.webrtc_url };
     case 'account_linked':
       return { kind: 'account_linked', scope: 'account', id: ev.account_id, steamId: ev.steam_id };
+    case 'steam_qr':
+      return { kind: 'steam_qr', scope: 'account', id: ev.account_id, challengeUrl: ev.challenge_url };
     case 'steam_guard':
       return ev.account_id
         ? { kind: 'steam_guard', scope: 'account', id: ev.account_id, guardType: ev.guard_type }
