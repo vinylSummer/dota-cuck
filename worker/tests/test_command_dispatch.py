@@ -54,7 +54,7 @@ def test_steam_guard_routes_with_code():
 def test_list_friends_routes_with_request_id():
     dispatcher, handlers = make_dispatcher()
     dispatcher.dispatch(
-        pb.Command(list_friends=pb.ListFriends(request_id="req-1", steam_username="u"))
+        pb.Command(list_friends=pb.ListFriends(request_id="req-1", refresh_token="rt"))
     )
     handlers["friends"].assert_called_once()
     assert handlers["friends"].call_args.args[0].request_id == "req-1"
