@@ -17,14 +17,14 @@ V3 in [validation-results.md](validation-results.md).)
 
 This is why the warm friends session is **dropped while spectating** and re-warmed after.
 
-**Risk:** GUI Steam login may re-trigger Steam Guard even after python-steam established
-device trust (separate sentry files). Validate manually. If both need separate Steam Guard
-confirmations, the two-prompt UX must be handled in the session state machine and surfaced
-to the user.
+**Risk:** GUI Steam login is a separate Steam session from the python-steam one and can't
+ingest the refresh token, so its first login may re-trigger Steam Guard even though the
+python-steam cold login is already token-based (zero-interaction). Validate manually. If GUI
+Steam needs its own Steam Guard confirmation, the prompt UX must be handled in the session
+state machine and surfaced to the user.
 
-**Mitigation to test:** pre-populate the GUI Steam sentry from the python-steam session, or
-accept that first login needs two Steam Guard confirmations and later logins reuse saved
-sentries.
+**Mitigation to test:** accept that the GUI Steam first login needs a Steam Guard confirmation
+and that later logins reuse its own persisted device trust on the `steam-data` volume.
 
 ## ⚠️ Dota spectate console command
 

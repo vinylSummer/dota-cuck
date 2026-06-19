@@ -15,14 +15,14 @@ CREATE TABLE users (
 
 -- Steam accounts linked to users (one per user in V1)
 CREATE TABLE steam_accounts (
-  id             UUID  PRIMARY KEY DEFAULT uuidv7(),
-  user_id        UUID  REFERENCES users(id) ON DELETE CASCADE,
-  steam_id       TEXT,                       -- backfilled from worker's first login; null until then
-  steam_username TEXT  NOT NULL,
-  enc_password   BYTEA NOT NULL,             -- AES-256-GCM ciphertext
-  enc_nonce      BYTEA NOT NULL,             -- GCM nonce
-  sentry_hash    BYTEA,                      -- Steam Guard device trust; stored after first login
-  created_at     TIMESTAMPTZ DEFAULT now()
+  id                    UUID        PRIMARY KEY DEFAULT uuidv7(),
+  user_id               UUID        REFERENCES users(id) ON DELETE CASCADE,
+  steam_id              TEXT,        -- backfilled when the link handshake completes; null until then
+  steam_username        TEXT,        -- null until backfilled (unknown up front for a QR link)
+  enc_refresh_token     BYTEA,       -- AES-256-GCM ciphertext of the Steam refresh token; null until linked
+  enc_refresh_nonce     BYTEA,       -- GCM nonce
+  refresh_token_expires TIMESTAMPTZ, -- from the token JWT `exp`, for proactive re-prompt
+  created_at            TIMESTAMPTZ DEFAULT now()
 );
 
 -- Workers (V1: one row, inserted at startup)

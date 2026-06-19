@@ -51,7 +51,7 @@ docker-compose.yml
 │                   env: DATABASE_URL, JWT_SECRET, CREDENTIAL_PEPPER, GRPC_LISTEN_ADDR
 ├── worker          build ./worker; depends_on control-plane, mediamtx
 │                   env: CONTROL_PLANE_ADDR, DISPLAY=:99
-│                   volumes: steam-data (Dota install, Steam userdata, sentry files)
+│                   volumes: steam-data (Dota install, Steam userdata, GUI Steam login state)
 │                   deploy.resources.reservations.devices: nvidia [gpu, compute, video]
 └── mediamtx        image bluenviron/mediamtx:latest; config ./mediamtx/mediamtx.yml
 nginx runs on the host on 443 (not in compose).
