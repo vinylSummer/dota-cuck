@@ -46,7 +46,85 @@ RUN dpkg --add-architecture i386 \
         wmctrl \
         net-tools \
         curl \
+        dbus-x11 \
+        zenity \
+        xfce4 \
+        xfce4-terminal \
+        x11vnc \
+        novnc \
+        websockify \
+        supervisor \
+        dumb-init \
+        x11-utils \
+        libvulkan1 \
+        libvulkan1:i386 \
+        mesa-vulkan-drivers \
+        mesa-vulkan-drivers:i386 \
+        vulkan-tools \
+        libglvnd0 \
+        libglvnd0:i386 \
+        kmod \
+        pkg-config \
+        wget \
     && rm -rf /var/lib/apt/lists/*
+
+# Replicate docker-steam-headless's GPU path: install the COMPLETE NVIDIA userspace driver
+# matching the host (wolf-den runs 610.43.02) INSIDE the image, instead of relying on the
+# NVIDIA Container Toolkit's partial CDI injection. The partial stack leaves steamwebhelper's
+# CEF unable to render (it falls back to the "steamwebhelper is not responding" dialog); a
+# full, self-consistent GL/EGL/Vulkan + 32-bit (compat32) stack fixes it. --no-kernel-modules:
+# only userspace is installed (the kernel module comes from the host via --gpus all).
+ARG NVIDIA_DRIVER_VERSION=610.43.02
+RUN cd /tmp \
+    && wget -q "https://us.download.nvidia.com/XFree86/Linux-x86_64/${NVIDIA_DRIVER_VERSION}/NVIDIA-Linux-x86_64-${NVIDIA_DRIVER_VERSION}.run" \
+         -O nvidia.run \
+    && chmod +x nvidia.run \
+    && ./nvidia.run --silent --accept-license \
+         --skip-depmod --skip-module-unload \
+         --no-kernel-modules --no-kernel-module-source \
+         --install-compat32-libs \
+         --no-nouveau-check --no-nvidia-modprobe --no-systemd \
+         --no-distro-scripts --no-rpms --no-backup \
+         --no-check-for-alternate-installs \
+         --no-libglx-indirect --no-install-libglvnd \
+    && rm -f nvidia.run \
+    && ldconfig
+
+# System dbus daemon (the `dbus` package, vs dbus-x11 which is only the session helpers) so the
+# system bus + messagebus user exist; steamwebhelper's CEF connects to it.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends dbus \
+    && rm -rf /var/lib/apt/lists/*
+
+# The CEF login popup only renders inside a real desktop session (xfwm4 + compositor) —
+# bare Xorg/openbox failed. We replicate docker-steam-headless: a full Xfce4 session on the
+# real NVIDIA Xorg :99, reached over x11vnc/noVNC for the one-time interactive login, with
+# supervisord ordering the services (Xorg -> dbus/Xfce -> VNC). Steam itself is launched
+# separately (docker exec) so V4 can drive the login vs auto-login phases.
+#
+# Steam must run NON-ROOT: srt-bwrap is not setuid, so as root it takes the privileged
+# namespace path and dies. Create a worker uid that matches the host owner of the steam-data
+# volume (/fard/steam, vinyl=1000) so the persisted, machine-bound token is reused verbatim.
+RUN groupadd -g 1000 worker \
+    && useradd -u 1000 -g 1000 -m -d /home/worker -s /bin/bash worker
+
+COPY scripts/validation/supervisord.conf /etc/supervisord.conf
+# Override the base image's headless xorg.conf with one that fakes a connected monitor (the
+# base config has no display, which makes steamwebhelper fail "Could not find display info").
+COPY scripts/validation/xorg.steam.conf /etc/X11/xorg.conf
+COPY scripts/validation/desktop/ /usr/local/bin/
+RUN chmod +x /usr/local/bin/start-dbus.sh /usr/local/bin/start-xfce.sh \
+             /usr/local/bin/start-vnc.sh /usr/local/bin/start-novnc.sh
+
+# Headless first-run gate: /usr/games/steam shows an interactive zenity --question
+# ("Install"/"Cancel", default Cancel) before it will download the real client, which
+# nothing can answer on a headless :99 — so the bootstrap never happens. Shadow zenity
+# with a stub that auto-accepts that one install --question (exit 0 = "Install") and
+# passes every other invocation through to the real zenity. /usr/local/bin precedes
+# /usr/bin on PATH, so this wins for the wrapper's `command -v zenity`.
+RUN printf '#!/bin/sh\nfor a in "$@"; do [ "$a" = "--question" ] && exit 0; done\nexec /usr/bin/zenity "$@"\n' \
+        > /usr/local/bin/zenity \
+    && chmod +x /usr/local/bin/zenity
 
 # python-steam pinned to the worker's line (protobuf-3.20 / Python 3.x). Installed into
 # a venv so it doesn't fight the system packages; the probes call /opt/steam-venv/bin/python.

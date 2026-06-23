@@ -1,45 +1,41 @@
-# Known Risks — Validate Manually Before Implementing
+# Known Risks — Validation Status
 
-These must be confirmed on the actual server before writing the worker spectate path.
+These were the risks to confirm on the real server before writing the worker spectate path.
+Results live in [validation-results.md](validation-results.md); current status is inline below.
 
-## ⚠️ CRITICAL: Dual Steam session problem
+## ✅ RESOLVED: GUI Steam login + dual session
 
 python-steam (match-ID resolution / friends) and the GUI Steam client cannot both be logged into
-the same account simultaneously — Steam terminates one session. Intended handoff:
+the same account simultaneously — Steam terminates one session. The original worry was that the
+GUI Steam client is a separate session that **cannot ingest the refresh token**, so its first
+login would re-trigger Steam Guard with no way to complete it headlessly.
 
-```
-python-steam login → resolve match ID (rich-presence WatchableGameID for target_steam_id)
-  → python-steam logout → GUI Steam launch + login → Dota launch → spectate match_id
-```
+**Resolved (V4):** the GUI client's token store is encrypted with an unpublished scheme, so a
+refresh token genuinely can't be seeded — but the modern Steam login UI (incl. its **QR code**)
+*does* render headless once the `docker-steam-headless` GPU/desktop stack is replicated (Xfce4 +
+full in-image NVIDIA driver + fake-monitor xorg.conf + `--shm-size=2g` + system dbus). So the GUI
+client does a **one-time interactive QR login**, and its persisted token then **auto-logs-in
+silently** on every later start (proven: fresh container, no VNC, no creds → `Logged On`).
 
-(Match-ID resolution is the warm session's rich presence, **not** a Game Coordinator query — see
-V3 in [validation-results.md](validation-results.md).)
+Design consequence: there are **two auth artifacts** — the user's python-steam refresh token
+(friends + `WatchableGameID`) and the GUI client's own **per-user** one-time login (persisted on
+the `steam-data` volume). For V1 the spectator *is* the user's account, so no python-steam↔GUI
+handoff is exercised. (Match-ID resolution is rich presence, **not** a GC query — V3.)
 
-This is why the warm friends session is **dropped while spectating** and re-warmed after.
+## ⚠️ Dota spectate console command (partially open)
 
-**Risk:** GUI Steam login is a separate Steam session from the python-steam one and can't
-ingest the refresh token, so its first login may re-trigger Steam Guard even though the
-python-steam cold login is already token-based (zero-interaction). Validate manually. If GUI
-Steam needs its own Steam Guard confirmation, the prompt UX must be handled in the session
-state machine and surfaced to the user.
+`steam -applaunch 570` can't see a `force_install_dir` install; Dota launches via the install's
+sniper wrapper (`run-in-sniper`) with the GUI client for auth — **validated: it authenticates and
+renders the menu** (V5). The remaining open item is **driving the in-game console**: `xdotool`
+(XTEST) events don't reach Source 2, so a virtual **uinput** device (`/dev/uinput` + `ydotool`) is
+needed before confirming the join command (`dota_spectate_game <match_id>`) + camera follow.
 
-**Mitigation to test:** accept that the GUI Steam first login needs a Steam Guard confirmation
-and that later logins reuse its own persisted device trust on the `steam-data` volume.
+## ✅ RESOLVED: Headless Xorg inside Docker with NVIDIA
 
-## ⚠️ Dota spectate console command
+Validated (V1): `Xorg :99` on the RTX 3090 (`BusID PCI:11:0:0`) with hardware GLX inside the
+container; NVENC (V6) and full Dota Vulkan rendering (V5) also confirmed.
 
-The exact console sequence to join a live match by ID must be confirmed. Candidate:
-`dota_spectate_game <match_id>` — or it may require a lobby/server connect flow. Validate
-headlessly with a known live match ID before implementing the automation layer.
+## ✅ RESOLVED: Steam + Dota installation in Docker
 
-## ⚠️ Headless Xorg inside Docker with NVIDIA
-
-Xorg must run on the GPU without a physical display. Requires `xorg.conf` with the correct
-RTX 3090 `BusID`, `nvidia-container-toolkit` on the host, and `DISPLAY=:99` in the
-container. Validate a GPU-accelerated process (`glxinfo`, `nvidia-smi`) works inside the
-worker container before writing automation.
-
-## ⚠️ Steam + Dota installation in Docker
-
-See [deployment.md](deployment.md) — ~70GB install via steamcmd into a named volume;
-decide the update strategy up front.
+Validated (V2): ~70GB Dota install via `steamcmd +force_install_dir /fard/steam/dota` onto the
+persistent ZFS dataset; resumable updates. See [deployment.md](deployment.md).

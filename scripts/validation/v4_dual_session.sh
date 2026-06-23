@@ -1,96 +1,161 @@
 #!/usr/bin/env bash
-# V4 — dual-session handoff (python-steam -> GUI Steam) + GUI-Steam Steam Guard.
+# V4 — headless GUI-Steam login via the docker-steam-headless desktop path.
 #
-# Proves the worker's §4-step-2 handoff: python-steam and the GUI Steam client can't
-# both hold the account at once, so the worker logs python-steam out before spectating.
-# This probe runs phase 1 (python-steam login -> prove live -> logout) then phase 2
-# (launch the GUI Steam client headless on :99 and log in with the same creds), and
-# captures enough to answer the open questions in known-risks.md:
-#   - Does GUI Steam's first login re-trigger Steam Guard / a mobile-confirmation TAP
-#     (which a headless box cannot perform)?
-#   - Where does GUI Steam write its (separate) sentry, and are later logins silent?
-#   - Is only one session on the account at a time (no "logged in elsewhere" kick)?
+# The modern Steam login CANNOT be driven headlessly: the CEF login popup never renders on
+# bare Xorg (and `steam -login user pass` is ignored), and the refresh token cannot be seeded
+# into the GUI client (its token store is encrypted with an unpublished scheme). The only
+# viable path is a ONE-TIME interactive login on a real desktop, after which the client's own
+# persisted (encrypted, machine-bound) token drives silent headless auto-login.
 #
-# It cannot fully automate a one-time mobile TAP (that needs a human on the phone) — it
-# surfaces the prompt and captures screenshots so you can complete it and record V4.
+# This script replicates docker-steam-headless: a full Xfce4 session on the real NVIDIA Xorg
+# :99 (xfwm4 + compositor make the CEF popup render), reachable over x11vnc/noVNC. It runs in
+# two phases:
+#   up        — start the desktop + Steam; operator logs in once over VNC (QR / 2FA)
+#   status    — report whether Steam has logged in (loginusers.vdf + "Logged On")
+#   autologin — PROOF: fresh container, VNC OFF, Steam with no creds -> must log on silently
+#   down      — tear down
 #
-#   set -a; . ~/.dota-validation.env; set +a   # (the runner does this too)
-#   scripts/validation/v4_dual_session.sh
+# The persisted login + both phases share $HOME on the ZFS dataset (same host => the
+# machine-bound token decrypts). Record findings in docs/validation-results.md (V4 section).
 #
-# Record findings in docs/validation-results.md (V4 section).
+#   scripts/validation/v4_dual_session.sh up         # then complete the login over VNC
+#   scripts/validation/v4_dual_session.sh status
+#   scripts/validation/v4_dual_session.sh autologin
+#   scripts/validation/v4_dual_session.sh down
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 set -a; . ~/.dota-validation.env; set +a
-: "${STEAM_USER:?set STEAM_USER in ~/.dota-validation.env}"
-: "${STEAM_PASS:?set STEAM_PASS in ~/.dota-validation.env}"
 
-# GUI Steam config + both sentries persist here (host-visible on the ZFS dataset), so a
-# second run can confirm the GUI-Steam login is silent. This is the steam-data location.
 STEAMHOME=${STEAM_HOME_DIR:-/fard/steam/steamhome}
 SHOTDIR="$STEAMHOME/v4-shots"
+NAME=dota-v4
+# Steam writes its connection log under one of these (depends on install layout).
+CLOG_GLOB=("$STEAMHOME/.steam" "$STEAMHOME/.local/share/Steam")
+
 mkdir -p "$STEAMHOME" "$SHOTDIR"
+# The steam-data volume must be owned by the in-container worker uid (1000) — it already is on
+# wolf-den (vinyl=1000), but assert so a silent permission failure doesn't masquerade as a
+# login failure.
+chown 1000:1000 "$STEAMHOME" 2>/dev/null || true
 
-echo "== building images =="
-docker build -f scripts/validation/Dockerfile.xtest -t dota-xtest .
-docker build -f scripts/validation/Dockerfile.steam -t dota-steam .
+build() {
+    echo "== building images =="
+    docker build -f scripts/validation/Dockerfile.xtest -t dota-xtest .
+    docker build -f scripts/validation/Dockerfile.steam -t dota-steam .
+}
 
-echo "== GUARD codes: drop into  $STEAMHOME/.dota-validation.guard  (container HOME) =="
-echo "== screenshots will be written to  $SHOTDIR  for you to inspect =="
+# Start the supervisord desktop (Xorg -> Xfce -> VNC) detached. $1 = ENABLE_VNC value.
+start_desktop() {
+    local enable_vnc="$1"
+    docker rm -f "$NAME" >/dev/null 2>&1 || true
+    # seccomp/apparmor unconfined: Steam's bwrap sandbox needs unprivileged user+mount
+    # namespaces, which the default Docker profiles block (the worker needs this too).
+    docker run -d --name "$NAME" --network host --gpus all \
+        --security-opt seccomp=unconfined \
+        --security-opt apparmor=unconfined \
+        --shm-size=2g \
+        -e NVIDIA_DRIVER_CAPABILITIES=all \
+        -e GTK_A11Y=none \
+        -e ENABLE_VNC="$enable_vnc" \
+        -e HOME="$STEAMHOME" \
+        -v /fard/steam:/fard/steam \
+        -v "$PWD/scripts/validation:/probe:ro" \
+        dota-steam dumb-init -- supervisord -c /etc/supervisord.conf >/dev/null
+}
 
-docker rm -f dota-v4 >/dev/null 2>&1 || true
-docker run --rm --name dota-v4 --network host --gpus all \
-    -e NVIDIA_DRIVER_CAPABILITIES=all \
-    -e HOME="$STEAMHOME" \
-    -e STEAM_USER="$STEAM_USER" -e STEAM_PASS="$STEAM_PASS" \
-    -v /fard/steam:/fard/steam \
-    -v "$PWD/scripts/validation:/probe:ro" \
-    dota-steam bash -c '
-    set -e
-    echo "--- starting Xorg :99 ---"
-    Xorg :99 -config /etc/X11/xorg.conf -noreset &
-    for i in $(seq 1 30); do DISPLAY=:99 xset q >/dev/null 2>&1 && break; sleep 0.5; done
-    DISPLAY=:99 xset q >/dev/null 2>&1 || { echo "Xorg :99 failed"; exit 1; }
+# Launch the GUI Steam client as the non-root worker, inside the Xfce session on :99.
+# $@ extra args (e.g. nothing, or a username to prefill). Logs to $STEAMHOME/v4-steam.log.
+launch_steam() {
+    # Wait until the Xfce session owns the display (a root window manager is present).
+    for _ in $(seq 1 60); do
+        docker exec "$NAME" bash -lc 'DISPLAY=:99 wmctrl -m >/dev/null 2>&1' && break
+        sleep 2
+    done
+    echo "== launching GUI Steam as worker on :99 =="
+    docker exec -d "$NAME" runuser -u worker -- bash -lc \
+        'export DISPLAY=:99 HOME=/fard/steam/steamhome XDG_RUNTIME_DIR=/tmp/xdg-worker; \
+         mkdir -p "$XDG_RUNTIME_DIR"; chmod 700 "$XDG_RUNTIME_DIR"; \
+         dbus-run-session -- steam -no-browser '"$*"' >"$HOME/v4-steam.log" 2>&1'
+}
 
-    echo "=== PHASE 1: python-steam login -> logout (vacate the account) ==="
-    /opt/steam-venv/bin/python /probe/v4_steam_phase.py
-    echo "=== PHASE 1 done; pausing 5s before GUI Steam takes the account ==="
-    sleep 5
+find_clog() { find "${CLOG_GLOB[@]}" -name connection_log.txt 2>/dev/null | head -1; }
 
-    echo "=== PHASE 2: GUI Steam client login on :99 ==="
-    SHOTS="$HOME/v4-shots"; mkdir -p "$SHOTS"
-    # First run bootstraps the real client; -login attempts a headless login. A guard /
-    # mobile-confirmation dialog (if any) renders on :99 and is caught in the screenshots.
-    DISPLAY=:99 steam -no-browser -login "$STEAM_USER" "$STEAM_PASS" >/tmp/steam.log 2>&1 &
-    STEAMPID=$!
+logged_on() {
+    local clog; clog=$(find_clog)
+    [ -n "$clog" ] && grep -qiE "Logged On|LoggedOn|Logon success" "$clog" 2>/dev/null
+}
 
-    LOGIN_OK=""
-    for i in $(seq 1 60); do      # ~180s: bootstrap download + login can be slow
-        # Single-frame screenshot for the operator to inspect any guard/tap dialog.
-        DISPLAY=:99 ffmpeg -hide_banner -loglevel error -y -f x11grab -frames:v 1 \
-            -i :99 "$SHOTS/shot-$(printf %03d "$i").png" 2>/dev/null || true
-        # GUI Steam logs its logon state changes; "Logon state changed" -> "Logged On".
-        CLOG=$(find "$HOME/.steam" "$HOME/.local/share/Steam" -name "connection_log.txt" 2>/dev/null | head -1)
-        if [ -n "$CLOG" ] && grep -qiE "Logged On|logon state.*LoggedOn|Logon success" "$CLOG" 2>/dev/null; then
-            LOGIN_OK=1; echo "GUI_STEAM_LOGGED_IN (per $CLOG)"; break
-        fi
-        if grep -qiE "two.?factor|guard|confirm.*mobile|approve" /tmp/steam.log "$CLOG" 2>/dev/null; then
-            echo "GUI_STEAM_GUARD_PROMPT_DETECTED — inspect $SHOTS and complete on your phone"
+has_loginusers() {
+    # Command substitution (not a `| head | grep` pipeline) avoids a pipefail false-negative:
+    # head closing early sends find SIGPIPE, which pipefail would treat as failure.
+    [ -n "$(find "${CLOG_GLOB[@]}" -name loginusers.vdf 2>/dev/null | head -1)" ]
+}
+
+shot() {
+    docker exec "$NAME" bash -lc \
+        "DISPLAY=:99 ffmpeg -hide_banner -loglevel error -y -f x11grab -i :99 -frames:v 1 '$STEAMHOME/v4-shots/$1.png'" \
+        2>/dev/null || true
+}
+
+case "${1:-}" in
+up)
+    build
+    start_desktop true
+    launch_steam ""
+    cat <<EOF
+
+== Desktop up. Complete the ONE-TIME Steam login over VNC. ==
+   From your machine, tunnel and open noVNC:
+     ssh -L 6080:localhost:6080 <wolf-den>      then browse http://localhost:6080/vnc.html
+   (or tunnel the raw VNC port:  ssh -L 5900:localhost:5900 <wolf-den>  -> VNC viewer localhost:5900)
+
+   Steam is bootstrapping its real client on first run (downloads, slow). When the login
+   window appears, sign in with the Steam Mobile app QR or your 2FA code.
+
+   Then check:   scripts/validation/v4_dual_session.sh status
+EOF
+    ;;
+status)
+    for i in $(seq 1 5); do shot "status-$(printf %02d "$i")"; sleep 2; done
+    echo "loginusers.vdf present: $(has_loginusers && echo yes || echo no)"
+    if logged_on; then
+        echo "V4 PHASE-1 PASS: GUI Steam logged in (per $(find_clog))."
+        echo "  Now prove silent headless auto-login:  $0 autologin"
+    else
+        echo "Not logged in yet. Steam log tail:"
+        tail -20 "$STEAMHOME/v4-steam.log" 2>/dev/null || true
+        echo "Inspect screenshots in $SHOTDIR and complete the login over VNC, then re-run status."
+    fi
+    ;;
+autologin)
+    has_loginusers || { echo "No loginusers.vdf yet — run 'up' and complete the login first."; exit 1; }
+    echo "== AUTO-LOGIN PROOF: fresh container, VNC OFF, no credentials =="
+    # Truncate the connection log so any "Logged On" we detect is from THIS silent run, not the
+    # earlier interactive login (the log persists on the steam-data volume).
+    docker rm -f "$NAME" >/dev/null 2>&1 || true
+    find "${CLOG_GLOB[@]}" -name connection_log.txt -exec sh -c ': > "$1"' _ {} \; 2>/dev/null || true
+    start_desktop false
+    launch_steam ""            # no -login, no creds — must use the persisted token
+    ok=""
+    for i in $(seq 1 40); do   # ~120s
+        if logged_on; then ok=1; echo "GUI Steam logged on silently (per $(find_clog))"; break; fi
+        if grep -qiE "two.?factor|guard|enter your|sign in" "$STEAMHOME/v4-steam.log" 2>/dev/null; then
+            echo "WARNING: a login prompt appeared — auto-login did NOT take."
         fi
         sleep 3
     done
-
-    echo "--- /tmp/steam.log (tail) ---"; tail -30 /tmp/steam.log 2>/dev/null || true
-    echo "--- GUI Steam sentry / config files (for the steam-data volume) ---"
-    find "$HOME/.steam" "$HOME/.local/share/Steam/config" \
-        -maxdepth 4 -type f \( -name "*.vdf" -o -name "ssfn*" -o -name "config.vdf" \) 2>/dev/null | head -20
-
-    kill $STEAMPID 2>/dev/null || true
-    if [ -n "$LOGIN_OK" ]; then
-        echo "V4 PASS (GUI Steam logged in headless). Confirm in docs whether a one-time"
-        echo "        human mobile tap was needed and that a re-run is silent."
+    shot "autologin-final"
+    if [ -n "$ok" ]; then
+        echo "V4 PASS: headless silent auto-login from the persisted token works."
     else
-        echo "V4 INCOMPLETE: GUI Steam not confirmed logged in within the window."
-        echo "        Inspect $SHOTS + /tmp/steam.log; likely a mobile-confirmation tap is required."
+        echo "V4 FAIL: no silent login within the window. Steam log tail:"
+        tail -25 "$STEAMHOME/v4-steam.log" 2>/dev/null || true
     fi
-'
-echo "== screenshots persisted at $SHOTDIR =="
+    ;;
+down)
+    docker rm -f "$NAME" >/dev/null 2>&1 || true
+    echo "torn down."
+    ;;
+*)
+    echo "usage: $0 {up|status|autologin|down}"; exit 2;;
+esac

@@ -13,8 +13,8 @@ containers). GPU host PCI address **0b:00.0** → Xorg **`PCI:11:0:0`**.
 | V1 Headless Xorg + NVIDIA GLX in Docker | Worker can render on a GPU-backed headless `:99` | ✅ PASS |
 | V2 Steam + Dota install via steamcmd | Dota installable into a named volume; update strategy | ✅ PASS (72G logical / 44G on ZFS, /fard/steam) |
 | V3 Match-ID resolution (python-steam rich presence) | Resolve a live match ID for a target steam_id | ✅ PASS (via rich presence, not GC) |
-| V4 Dual-session handoff + Steam Guard | python-steam→GUI Steam handoff guard behavior | ⏳ PARTIAL — phase 1 (python-steam handoff) PASS; GUI-Steam phase pending |
-| V5 Dota spectate console command | Exact sequence to join a live match + follow camera | ⏳ needs Steam creds + Dota + live match |
+| V4 Headless GUI-Steam login (QR + silent auto-login) | A worker can log the GUI Steam client in headless, once, then auto-login silently | ✅ PASS |
+| V5 Dota launch + spectate | Launch Dota headless (steamcmd-managed install), authenticate, render; join a live match + follow camera | ⏳ PARTIAL — launch + render + Steam auth PASS; spectate console-join needs uinput input + a live match |
 | V6 FFmpeg x11grab → hevc_nvenc → SRT → mediamtx | NVENC on headless Xorg; SRT path to mediamtx | ✅ PASS to mediamtx (browser WebRTC leg = human check) |
 
 ---
@@ -163,58 +163,96 @@ free)**, the intended `steam-data` location, plus `/poop` (1.5T). The install ta
   then proceeded (no code typed). This is **different from the python-steam friends/link flow**
   (V3), which used an entered mobile *code* (`two_factor_code`). Big V4 implication: a fresh GUI
   Steam login on the worker may demand a **device tap the headless worker cannot perform** — so
-  the GUI Steam **sentry/device-trust must be established once and must suppress the confirmation
-  on subsequent logins**, or first-time spectate setup needs a human approval. Confirm in V4.
+  the GUI Steam device-trust must be established once and must suppress the confirmation on
+  subsequent logins, or first-time spectate setup needs a human approval. **Confirmed in V4:** the
+  GUI client's one-time login is a **QR scan** (the headless UI renders the QR), after which the
+  persisted token auto-logs-in silently with no further interaction.
 - **Security note:** `steamcmd +login user pass` exposes credentials in the process list. The
   real worker passes creds over gRPC (never argv); this is a harness-only artifact. Rotate the
   test-account password after validation.
 
-## V4 — Dual-session handoff + GUI-Steam Steam Guard — ⏳ PARTIAL (phase 1 PASS)
+## V4 — Headless GUI-Steam login (QR) + silent auto-login — ✅ PASS (2026-06-19)
 
-Probe: `v4_dual_session.sh` (+ `v4_steam_phase.py`). Needs live creds (`~/.dota-validation.env`).
-Run while you can complete a one-time mobile confirmation on your phone. Container
-`HOME=/fard/steam/steamhome` (sentries persist on the ZFS dataset).
+Probe: `v4_dual_session.sh {up|status|autologin|down}`. Container `HOME=/fard/steam/steamhome`
+(the GUI client's encrypted token persists on the ZFS dataset).
 
-- [x] **Phase 1 PASS (2026-06-17)** — python-steam logged in as STEAM_USER (`vinyl summer`,
-      `76561198179568701`), saw 194 friends, and logged out cleanly (`PYTHON_STEAM_LOGGED_OUT`),
-      vacating the account for the GUI client. Needed one mobile Steam Guard code.
-- [ ] **GUI-Steam first login**: did Steam Guard / a mobile-confirmation **tap** fire? Tap
-      (uncompletable headless, needs a one-time human) or a typed code? — _not yet observed_
-- [ ] After completing the first login, is the **next** GUI-Steam login **silent** (device trusted)?
-- [ ] Only **one** session on the account at a time — no "logged in elsewhere" kick after handoff?
-- [ ] Implication for route A: if a guard genuinely fires per-login, the session SM must surface a
-      second session-scoped `SteamGuardRequired` (empty `request_id`).
+The earlier blocker — the modern Steam login UI not rendering headless (CEF `Failed to create
+popup` / `Cannot read properties of undefined`, all windows 10×10) — is **solved** by replicating
+the `docker-steam-headless` GPU/desktop stack. Each of the following was necessary; partial fixes
+still failed:
 
-> **Blocker found (2026-06-19):** even with the full headless GUI-Steam launch recipe working
-> (steamwebhelper runs on hardware GL — non-root + seccomp/apparmor unconfined + bind-mounted
-> 32-bit NVIDIA GL + dbus + zenity stub), the **modern Steam login UI never renders headless**
-> (CEF login popup fails: `Failed to create popup` / `Cannot read properties of undefined`).
-> Interactive GUI-Steam login is not viable headless. This motivates seeding a refresh
-> token for silent auto-login, dovetailing with the refresh-token auth model. Architecture
-> decision pending.
+1. **Full Xfce4 session** (xfwm4 + compositor) on the X server — bare Xorg / lone openbox fail.
+2. **Complete in-image NVIDIA driver** matching the host (the public `610.43.02` `.run`,
+   `--no-kernel-modules --install-compat32-libs --no-install-libglvnd`) instead of the Container
+   Toolkit's *partial* CDI injection — gives a self-consistent GL/EGL/Vulkan + 32-bit stack.
+3. **Fake connected monitor** in `xorg.conf` (`scripts/validation/xorg.steam.conf`:
+   `ConnectedMonitor "DFP-0"` + a `Modeline` + EDID-less `ModeValidation`). Without it
+   steamwebhelper dies with `CreateOutputWindow: failed to create window: Could not find display
+   info`. `xrandr` then reports `HDMI-0 connected`.
+4. **`--shm-size=2g`** on `docker run` — Docker's default 64 MB `/dev/shm` is too small for Steam's
+   CEF shared-memory IPC: `shmemstream.cpp … CSharedMemStream … 8192, 0` → `Failed to connect to
+   master html process` → **Bus error (SIGBUS)**.
+5. **System dbus** running (the `dbus` package, not just `dbus-x11`).
 
-Screenshots: `/fard/steam/steamhome/v4-shots/`.
+Also: Steam runs **non-root** (worker uid 1000, owns `$HOME`); `--security-opt
+seccomp=unconfined,apparmor=unconfined`; `steam -no-browser` (no creds — `-login` is ignored).
+
+- [x] **Phase 1 — interactive login renders headless.** The full Steam sign-in window (account
+      fields **and a live QR code**) renders on `:99`, reachable over x11vnc/noVNC. Operator
+      scanned the QR once with the Steam Mobile app → logged in; `loginusers.vdf` persisted
+      (`rabsomera_awesome` / "vinyl summer" `76561198179568701`, `RememberPassword=1`,
+      `AllowAutoLogin=1`), `connection_log.txt` → `Logged On`.
+- [x] **Phase 2 — silent auto-login PASS.** A fresh container with **VNC off and no credentials**
+      reaches `Logged On` from the persisted token, no Steam Guard. (`v4_dual_session.sh autologin`.)
+
+**Design implications:**
+- The GUI Steam client's token store is encrypted with an unpublished scheme — a python-steam
+  refresh token **cannot** be seeded into it. So the GUI client needs its **own one-time
+  interactive login**; thereafter the persisted token auto-logs-in silently. This is a *second*
+  auth artifact alongside the user's refresh token (which serves friends + match-ID).
+- **Per-user GUI login** (decided): each user's account logs into the GUI client once. The login's
+  native QR will later be surfaced to the browser over WS (reusing the QR-primary link flow); VNC
+  is the operator path for validation.
+- The dual-session concern from [known-risks.md](known-risks.md) is moot for V1: the validation
+  account is itself the spectator, so no python-steam↔GUI handoff is exercised here.
+
+Recipe baked into `scripts/validation/{Dockerfile.steam,xorg.steam.conf,supervisord.conf,
+desktop/*.sh}`. Screenshots: `/fard/steam/steamhome/v4-shots/`.
 
 ---
 
-## V5 — Dota spectate console command + camera follow — ⏳ PENDING
+## V5 — Dota launch + spectate — ⏳ PARTIAL (launch + render + auth PASS; spectate pending)
 
-Probe: `v5_spectate.sh`. Preconditions: V4 passed (silent GUI-Steam login), Dota at
-`/fard/steam/dota`, a **fresh** `WatchableGameID` (re-run `v3_gc_matchid.py` while a friend is in a
-live watchable match; it writes `~/.dota-validation.matchid`).
+Probe: `v5_spectate.sh {up|spectate|down}`. Reuses the V4 desktop stack + persisted silent login.
 
+### Dota launch + render — ✅ PASS (2026-06-19)
+`steamcmd +force_install_dir` produces a **flat** install (everything in `/fard/steam/dota`, no
+`steamapps/common/<installdir>/`), so the GUI client's `-applaunch 570` can't see it. **Fix:**
+launch directly through the install's own sniper wrapper (the same `_v2-entry-point` Steam uses per
+`toolmanifest.vdf`), with the GUI Steam client running only for auth:
+```
+SteamAppId=570 /fard/steam/dota/run-in-sniper -- /fard/steam/dota/game/dota.sh -novid -console -nosound -nopreload
+```
+- This **keeps steamcmd managing the install** (`force_install_dir`, autoupdates) — no GUI library
+  registration, no re-download, no layout change.
+- Verified live: `dota2` runs inside `srt-bwrap`, `SteamAPI_Init(): Loaded steamclient.so OK`
+  (authenticated against the headless Steam client), and the **Dota 2 main menu renders** on the
+  RTX 3090 via Vulkan. First launch does a slow Fossilize Vulkan-pipeline precompile
+  (`shadercache/570/fozpipelinesv6`, several min, ~250% CPU) before the window appears.
+
+### Spectate console-join — ⏳ remaining
 Record (Task C copies this **verbatim**):
 
-- [ ] Exact **launch options** that authenticate + render cleanly headless on `:99`
-      (probe tries `steam -applaunch 570 -novid -console -nosound -nopreload`).
-- [ ] Exact **spectate-join** command + how issued (xdotool keystrokes into the `` ` `` console).
-      Candidate tried: `dota_spectate_game <WatchableGameID>`. Working command: _(fill in)_
-- [ ] Exact **camera-follow** command(s). Candidates tried: `dota_spectator_mode 1`,
-      `spec_player 0`, `dota_spectator_autofollow 1`. Working command: _(fill in)_
-- [ ] **Spectator delay** observed (affects `stream_ready` timing).
-- [ ] Any match-watchability gotchas (private/non-watchable, delay before joinable).
-- [ ] Confirmed the captured `:99` frame is the **moving live match** (not the menu) —
-      `v5-shots/v5_capture.mp4` + screenshots.
+- [ ] **Input injection:** `xdotool` (XTEST) keystrokes/clicks do **not** reach the Dota window
+      (Source 2 ignores synthetic X events). Next: a virtual **uinput** device (`/dev/uinput` +
+      `ydotool`), matching `docker-steam-headless`'s `ENABLE_EVDEV_INPUTS`. Working method: _(fill in)_
+- [ ] Exact **spectate-join** command. Candidate: `dota_spectate_game <WatchableGameID>` in the
+      `` ` `` console. Working command: _(fill in)_
+- [ ] Exact **camera-follow** command(s). Candidates: `dota_spectator_mode 1`, `spec_player 0`,
+      `dota_spectator_autofollow 1`. Working command: _(fill in)_
+- [ ] **Spectator delay** observed (affects `stream_ready` timing); match-watchability gotchas.
+- [ ] Confirmed the captured `:99` frame is the **moving live match** (needs a fresh
+      `WatchableGameID` — re-run `v3_gc_matchid.py`). `v5-shots/v5_capture.mp4` + screenshots.
 
-Screenshots + capture: `/fard/steam/steamhome/v5-shots/`. _Findings:_ _(fill in)_
+Screenshots + capture: `/fard/steam/steamhome/v5-shots/`.
 
