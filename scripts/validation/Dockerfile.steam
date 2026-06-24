@@ -7,7 +7,10 @@
 #   - steamcmd            (CLI Steam; same login path V2 used)
 #   - steam-installer     (the GUI Steam client; bootstraps the real client on first run)
 #   - python3 + python-steam==1.4.4 (the warm-session login leg of V4, matching the worker)
-#   - xdotool             (drive the in-game Dota console headless on :99 in V5)
+#   - xdotool             (window management on :99 — activate/find the Dota window)
+#   - python3-evdev       (kernel-level uinput input; Source 2 ignores XTEST synthetic events,
+#                          so the in-game console must be driven via /dev/uinput in V5.
+#                          ydotool isn't packaged in trixie — evdev's UInput is the equivalent)
 #
 # Build (the runners do this for you):
 #   docker build -f scripts/validation/Dockerfile.xtest -t dota-xtest .
@@ -43,6 +46,10 @@ RUN dpkg --add-architecture i386 \
         python3-pip \
         python3-venv \
         xdotool \
+        xinput \
+        xserver-xorg-input-libinput \
+        xserver-xorg-input-evdev \
+        python3-evdev \
         wmctrl \
         net-tools \
         curl \
@@ -66,6 +73,8 @@ RUN dpkg --add-architecture i386 \
         kmod \
         pkg-config \
         wget \
+        tesseract-ocr \
+        imagemagick \
     && rm -rf /var/lib/apt/lists/*
 
 # Replicate docker-steam-headless's GPU path: install the COMPLETE NVIDIA userspace driver
@@ -112,9 +121,16 @@ COPY scripts/validation/supervisord.conf /etc/supervisord.conf
 # Override the base image's headless xorg.conf with one that fakes a connected monitor (the
 # base config has no display, which makes steamwebhelper fail "Could not find display info").
 COPY scripts/validation/xorg.steam.conf /etc/X11/xorg.conf
+# Force-bind our uinput keyboard to libinput (see file header) so Dota receives real key events.
+COPY scripts/validation/xorg-input.conf /etc/X11/xorg.conf.d/99-dota-uinput.conf
 COPY scripts/validation/desktop/ /usr/local/bin/
 RUN chmod +x /usr/local/bin/start-dbus.sh /usr/local/bin/start-xfce.sh \
-             /usr/local/bin/start-vnc.sh /usr/local/bin/start-novnc.sh
+             /usr/local/bin/start-vnc.sh /usr/local/bin/start-novnc.sh \
+             /usr/local/bin/uinput_daemon.py /usr/local/bin/uinput_console.py \
+             /usr/local/bin/vnc_input_daemon.py /usr/local/bin/vnc_pipe_forward.sh \
+             /usr/local/bin/gui_spectate.py \
+             /usr/local/bin/start-udev-auto.sh /usr/local/bin/start-udev.sh \
+             /usr/local/bin/start-dumb-udev.sh
 
 # Headless first-run gate: /usr/games/steam shows an interactive zenity --question
 # ("Install"/"Cancel", default Cancel) before it will download the real client, which
@@ -130,5 +146,20 @@ RUN printf '#!/bin/sh\nfor a in "$@"; do [ "$a" = "--question" ] && exit 0; done
 # a venv so it doesn't fight the system packages; the probes call /opt/steam-venv/bin/python.
 RUN python3 -m venv /opt/steam-venv \
     && /opt/steam-venv/bin/pip install --no-cache-dir "steam[client]==1.4.4"
+
+# dumb-udev — the read-only-/sys udev provider (see start-dumb-udev.sh). Source 2's libudev
+# input enumeration busy-loops without /run/udev; dumb-udev fakes the udev runtime so the
+# in-game console can be driven via /dev/uinput. Pinned to the same commit docker-steam-headless
+# ships. Own venv (it needs pyudev + murmurhash2); `dumb-udev` is exposed on PATH for the
+# start scripts. `udev` provides udevadm/libudev; `git` is needed only to build the git+ install
+# (kept in this late layer so it doesn't invalidate the NVIDIA-driver cache above).
+ARG DUMB_UDEV_VERSION=64d1427
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends udev git \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m venv /opt/udev-venv \
+    && /opt/udev-venv/bin/pip install --no-cache-dir \
+         "git+https://github.com/Steam-Headless/dumb-udev.git@${DUMB_UDEV_VERSION}" \
+    && ln -sf /opt/udev-venv/bin/dumb-udev /usr/local/bin/dumb-udev
 
 CMD ["bash"]
