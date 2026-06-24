@@ -449,6 +449,17 @@ class SteamSession:
             time.sleep(RICH_PRESENCE_POLL_INTERVAL_SECONDS)
         return None
 
+    def persona_name(self, target_steam_id: str) -> str:
+        """Persona name of the target from the warm session's cache (populated by
+        ``resolve_match_id``'s persona-state request). Used to locate the friend's
+        row in the Dota GUI by OCR. Returns ``""`` if unknown. Best-effort: no
+        network call, just reads the cached user."""
+        from steam.steamid import SteamID
+
+        client = self._ensure_client()
+        user = client.get_user(SteamID(int(target_steam_id)))
+        return getattr(user, "name", "") or ""
+
     def logout(self) -> None:
         """Drop the session (e.g. before GUI Steam takes the account to spectate)."""
         if self._client is not None and getattr(self._client, "logged_on", False):
