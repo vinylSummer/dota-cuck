@@ -15,6 +15,7 @@ import threading
 import uuid
 
 import state_machine as sm
+from dota_client import DotaClient, SpectateError
 from grpc_client import CommandDispatcher, GrpcClient
 from steam_client import LoginError, SteamGuardRequired, SteamSession
 
@@ -144,10 +145,18 @@ def steam_guard_event(request_id: str, guard_type: str) -> pb.WorkerEvent:
 
 class Agent:
     def __init__(
-        self, address: str, worker_id: str, steam_session: SteamSession | None = None
+        self,
+        address: str,
+        worker_id: str,
+        steam_session: SteamSession | None = None,
+        dota_client: DotaClient | None = None,
     ) -> None:
         self.state = sm.State.STOPPED
         self._steam = steam_session if steam_session is not None else SteamSession()
+        # The Dota GUI automation. Optional in V1: until the GUI-Steam-login + Dota
+        # launch bring-up is wired into the worker (step 8/11, shell-validated), a
+        # worker with no DotaClient resolves the match id then stops at the handoff.
+        self._dota = dota_client
         dispatcher = CommandDispatcher(
             on_start_spectate=self._on_start_spectate,
             on_stop_spectate=self._on_stop_spectate,
@@ -201,8 +210,34 @@ class Agent:
         log.info("StartSpectate: resolved match_id=%s", match_id)
         self._client.send(match_id_resolved_event(match_id, cmd.target_steam_id))
 
-        # --- C continues here: logout python-steam, GUI Steam, Dota launch,
-        # spectate join + camera follow, FFmpeg, StreamStarted (step 9). ---
+        # --- C: drive the GUI spectate path (dashboard -> WATCH FRIEND LIVE ->
+        # player view). The friend's persona name (for the OCR row match) comes
+        # from the warm session that just resolved the match id. ---
+        if self._dota is None:
+            log.info("StartSpectate: no DotaClient wired; GUI spectate + FFmpeg "
+                     "pending (step 8/11 bring-up)")
+            return
+
+        try:
+            target_name = self._steam.persona_name(cmd.target_steam_id)
+        except Exception as exc:  # noqa: BLE001 — non-fatal; spectate will fail to locate
+            target_name = ""
+            log.warning("StartSpectate persona-name lookup failed: %s", exc)
+
+        try:
+            self._dota.spectate(target_name)
+        except SpectateError as exc:
+            log.warning("StartSpectate GUI spectate failed (%s): %s", exc.code, exc)
+            self._fail_spectate(exc.code, str(exc))
+            return
+        except Exception as exc:  # noqa: BLE001 — any Dota/runtime failure is fatal
+            log.warning("StartSpectate GUI spectate error: %s", exc)
+            self._fail_spectate("SPECTATE_FAILED", str(exc))
+            return
+        log.info("StartSpectate: live spectate established (player view)")
+
+        # --- step 9 continues here: start FFmpeg (x11grab -> hevc_nvenc -> SRT),
+        # then emit StreamStarted to drive STARTING -> SPECTATING. ---
 
     def _fail_spectate(self, code: str, message: str) -> None:
         """Emit a fatal ErrorEvent and drive STARTING → STOPPING."""
