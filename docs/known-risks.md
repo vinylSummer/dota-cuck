@@ -22,13 +22,23 @@ Design consequence: there are **two auth artifacts** — the user's python-steam
 the `steam-data` volume). For V1 the spectator *is* the user's account, so no python-steam↔GUI
 handoff is exercised. (Match-ID resolution is rich presence, **not** a GC query — V3.)
 
-## ⚠️ Dota spectate console command (partially open)
+## ⚠️ Dota spectate initiation — mechanism corrected; GUI-automation (open)
 
 `steam -applaunch 570` can't see a `force_install_dir` install; Dota launches via the install's
 sniper wrapper (`run-in-sniper`) with the GUI client for auth — **validated: it authenticates and
-renders the menu** (V5). The remaining open item is **driving the in-game console**: `xdotool`
-(XTEST) events don't reach Source 2, so a virtual **uinput** device (`/dev/uinput` + `ydotool`) is
-needed before confirming the join command (`dota_spectate_game <match_id>`) + camera follow.
+renders the menu** (V5). **Input injection is now solved** too: a libinput-bound **uinput** device
+(keyboard + absolute mouse) delivers real X input that Source 2 accepts (XTEST is ignored).
+
+**Corrected (2026-06-24):** the assumed console join command **`dota_spectate_game <match_id>` does
+not exist** (verified against the wiki and this build's binaries) — and **no console command joins a
+live match by id at all**. Live spectating is **GC-mediated through the GUI** (the Watch tab is
+tournaments/replays only). **Decision:** initiate a friend spectate by **automating the GUI**
+(friends panel → right-click friend in a live match → Spectate) with the uinput mouse; the native
+client does the GC handshake/connect/render. This is **team-vision-only** (Dota Plus) — accepted for
+V1. GC automation (python-dota2) was rejected: it can't render, needs a second GC session the account
+can't grant, and was already proven not to connect (V3). The open item is the exact GUI click path +
+in-session camera commands (the real ones: `dota_spectator_mode`, `spec_player`, …). See
+[validation-results.md](validation-results.md) V5.
 
 ## ✅ RESOLVED: Headless Xorg inside Docker with NVIDIA
 

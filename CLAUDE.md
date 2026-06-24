@@ -215,7 +215,9 @@ handlers — see [docs/testing.md](docs/testing.md).
 
 **Worker:** `STOPPED → STARTING → IDLE`, then `IDLE → STARTING → SPECTATING → STOPPING → IDLE`.
 STARTING does python-steam login → match-ID resolution (rich-presence `WatchableGameID`) → GUI
-Steam login → Dota launch → match join → FFmpeg start. STOPPING tears those down. A Steam Guard interrupt during STARTING sends
+Steam login → Dota launch → **GUI-automated spectate join** (friends panel → right-click target →
+Spectate, via the uinput mouse; there is no console join command) → FFmpeg start. STOPPING tears
+those down. A Steam Guard interrupt during STARTING sends
 `SteamGuardRequired`, pauses login, waits for `SubmitSteamGuardCode`, then resumes.
 
 **Session (control plane):**
@@ -289,9 +291,13 @@ worker `StreamStarted`/`StatusUpdate`/`ErrorEvent` events, or WS push. Steps 11�
 remain and are greenfield (no `docker-compose.yml`, Dockerfiles, or `nginx.conf` yet). Known-risks
 have been validated live on the server (see [docs/validation-results.md](docs/validation-results.md)):
 V1 headless Xorg/NVIDIA, V2 Dota install, V3 match-ID, V6 NVENC/SRT, and **V4 headless GUI-Steam
-QR login + silent auto-login** all pass; **V5** has Dota launch + render + Steam auth passing (via
-the install's sniper wrapper) with only the spectate **console-join** (needs uinput input + a live
-match) outstanding.
+QR login + silent auto-login** all pass; **V5** has Dota launch + render + Steam auth + the **input
+path** (uinput keyboard + absolute mouse via libinput) passing, with only live **spectate
+initiation** outstanding. That initiation is **GUI automation, not a console command**:
+`dota_spectate_game` was found **not to exist** (no console command joins a live match by id), so a
+friend spectate is started by driving **friends panel → right-click friend → Spectate** with the
+uinput mouse (team-vision-only via Dota Plus; GC automation rejected — see
+[docs/validation-results.md](docs/validation-results.md) V5).
 
 1. `proto/worker.proto` — finalise and generate Go + Python code first ✓
 2. `db/migrations/` — schema only ✓
@@ -304,8 +310,10 @@ match) outstanding.
    `LinkAccount` (QR or credentials handshake; token persisted encrypted, no sentry/`login_key`) ✓;
    match-ID resolution via rich presence `WatchableGameID` (no GC, no `dota2` dep), wired into
    `steam_client.py` on the warm session ✓
-8. Worker Dota automation — headless launch (sniper wrapper + headless GUI-Steam auth, V4/V5 ✓),
-   spectate command, camera follow
+8. Worker Dota automation — headless launch (sniper wrapper + headless GUI-Steam auth, V4/V5 ✓);
+   input path (uinput keyboard + absolute mouse via libinput, V5 ✓); spectate initiation via **GUI
+   automation** (friends panel → right-click friend → Spectate; **no console join command exists**),
+   then camera via in-session console commands (`dota_spectator_mode`, `spec_player`, …)
 9. Worker FFmpeg pipeline — x11grab → hevc_nvenc → SRT → mediamtx
 10. Frontend — Login, Friends, Watch pages, SteamGuardModal/AccountLink, WebSocket integration;
     decision-logic unit tests (Vitest + MSW) ✓

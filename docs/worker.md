@@ -53,18 +53,28 @@ and `make proto` invoke `uv run`. Pins: `protobuf==3.20.3`, `grpcio==1.48.2`,
   not running the game, so there is no GC query and **no `dota2` dependency** (see
   [validation-results.md](validation-results.md) V3). Wired into `steam_client.py`
   (`resolve_match_id` / `extract_watchable_match_id`) + `agent.py` (`MatchIdResolved`).
-- Launch and automate Dota 2 on headless Xorg (`DISPLAY=:99`); join in spectator mode; select
-  player-follow camera via console commands.
+- Launch and automate Dota 2 on headless Xorg (`DISPLAY=:99`). **Initiating a spectate is GUI
+  automation, not a console command** — there is **no console command that joins a live match by id**
+  (`dota_spectate_game` does not exist; verified against the build's binaries — V5). The path is:
+  drive the **friends panel → right-click the target friend (in a live match) → Spectate** via a
+  libinput-bound uinput **mouse**, located with OCR-anchored clicks; the native client then does the
+  GC watch handshake, SDR ticket, connect, and render. This is **team-vision-only** (Dota Plus) —
+  accepted for V1. Once spectating, set the **camera** with the real in-session console commands
+  (`dota_spectator_mode`, `spec_player <n>`, `spec_mode`, …) over the uinput **keyboard** (the `` ` ``
+  console toggle is engine-special). Input delivery (uinput + libinput, both keyboard and absolute
+  mouse) is validated — see [validation-results.md](validation-results.md) V5.
 - Run the FFmpeg pipeline (see [deployment.md](deployment.md)).
 - Report all state transitions and errors upstream.
 
 ## Libraries
 
 `steam` (python-steam) for login, friends, and rich-presence match-ID resolution; `grpcio` for
-the stream; `pyautogui` / `python-xlib` as a GUI-automation fallback if needed. **No `dota2`
-(python-dota2) dependency** — the GC is not used for match-ID resolution (see V3 in
-[validation-results.md](validation-results.md)); keep it out of the worker deps unless the V5
-spectate join turns out to need it.
+the stream. GUI automation is delivered through a **uinput device** (keyboard + absolute mouse)
+bound by libinput — Source 2 ignores XTEST, so `pyautogui`/`xdotool` (XTEST) do **not** work; screen
+state is read with **tesseract OCR**, not a vision model. **No `dota2` (python-dota2) dependency** —
+the GC is used neither for match-ID resolution (rich presence — V3) nor for spectate initiation (the
+GUI client does the GC handshake itself; GC automation was rejected — see V5 / known-risks). Keep
+`dota2` out of the worker deps.
 
 ## Modules
 
@@ -74,7 +84,7 @@ spectate join turns out to need it.
 | `grpc_client.py` | Bidirectional stream + `CommandDispatcher` (pure command routing) |
 | `state_machine.py` | Pure worker state-machine table |
 | `steam_client.py` | Warm python-steam session, refresh-token acquisition (QR/credentials handshake) + token CM login, interactive Steam Guard, `derive_status` (friends), rich-presence `WatchableGameID` match-ID resolution (`resolve_match_id` / `extract_watchable_match_id`) |
-| `dota_client.py` | GUI Dota automation — launch, join, camera (stub) |
+| `dota_client.py` | GUI Dota automation — launch (sniper wrapper); spectate via friends-panel right-click→Spectate (uinput mouse + OCR); camera via in-session console commands (uinput keyboard) (stub) |
 | `ffmpeg.py` | FFmpeg subprocess management (stub) |
 | `xorg/xorg.conf` | Headless NVIDIA display config (fill in BusID) |
 | `gen/` | Generated protobuf Python code — do not edit |

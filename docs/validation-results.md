@@ -14,7 +14,7 @@ containers). GPU host PCI address **0b:00.0** → Xorg **`PCI:11:0:0`**.
 | V2 Steam + Dota install via steamcmd | Dota installable into a named volume; update strategy | ✅ PASS (72G logical / 44G on ZFS, /fard/steam) |
 | V3 Match-ID resolution (python-steam rich presence) | Resolve a live match ID for a target steam_id | ✅ PASS (via rich presence, not GC) |
 | V4 Headless GUI-Steam login (QR + silent auto-login) | A worker can log the GUI Steam client in headless, once, then auto-login silently | ✅ PASS |
-| V5 Dota launch + spectate | Launch Dota headless (steamcmd-managed install), authenticate, render; join a live match + follow camera | ⏳ PARTIAL — launch + render + Steam auth PASS; spectate console-join needs uinput input + a live match |
+| V5 Dota launch + spectate | Launch Dota headless (steamcmd-managed install), authenticate, render; join a live match + follow camera | ⏳ PARTIAL — launch + render + Steam auth + input path PASS; spectate now via **GUI mouse automation** (no console join command exists), against a live match — pending |
 | V6 FFmpeg x11grab → hevc_nvenc → SRT → mediamtx | NVENC on headless Xorg; SRT path to mediamtx | ✅ PASS to mediamtx (browser WebRTC leg = human check) |
 
 ---
@@ -29,6 +29,18 @@ containers). GPU host PCI address **0b:00.0** → Xorg **`PCI:11:0:0`**.
   `Dockerfile.steam` adds `ENV PATH=/usr/games:$PATH` so they resolve inside `bash -c`.
 - **`steam-installer` / `steamcmd` gate on a debconf license prompt** — `Dockerfile.steam`
   pre-accepts it (`debconf-set-selections`) so the non-interactive build doesn't hang.
+- **Read screenshots with OCR, not a vision model.** `scripts/validation/ocr.sh <shot|abs-path>`
+  runs `imagemagick` preprocessing + `tesseract` inside the container against a shot on the shared
+  `/fard/steam` volume. **Use `PSM=6` for modal/dialog text** (default 11 is for sparse text and
+  mangles dialog titles). Known modal OCR signatures (anchor strings for state detection) are
+  catalogued in the worker-spectate progress memory: "Update Required" → `out of date`; "Player
+  Behavior Summary" → `PLAYER BEHAVIOR SUMMARY`; "Party Invitation" → `PARTY INVITATION`; bare
+  dashboard/ready → `PLAY DOTA` (seasonal strings like Quartero's/Overwatch/Collector's Cache are
+  NOT stable; the Dota font also makes OCR swap R→K / T→I on the nav tabs).
+- **Ground-truth any console command before relying on it** — grep the game libs
+  (`grep -aoE 'dota_[a-z_]*' game/dota/bin/linuxsteamrt64/lib{client,server}.so`) or run
+  `find <substr>` in-console (`-condebug` → `console.log`). The planned `dota_spectate_game` /
+  `dota_spectator_autofollow` turned out **not to exist** (see V5).
 
 ---
 
@@ -240,19 +252,68 @@ SteamAppId=570 /fard/steam/dota/run-in-sniper -- /fard/steam/dota/game/dota.sh -
   RTX 3090 via Vulkan. First launch does a slow Fossilize Vulkan-pipeline precompile
   (`shadercache/570/fozpipelinesv6`, several min, ~250% CPU) before the window appears.
 
-### Spectate console-join — ⏳ remaining
-Record (Task C copies this **verbatim**):
+### Input injection — ✅ SOLVED (2026-06-23/24)
+Source 2 **ignores XTEST** (what stock `xdotool`/x11vnc inject), so input is delivered through a
+real kernel **uinput** device that **libinput** claims as genuine X input. The full recipe, all
+necessary:
+1. Install an Xorg input driver — `xserver-xorg-input-libinput` (+ `-evdev`, `xinput`); the base
+   image had only `inputtest_drv.so`.
+2. A persistent **uinput daemon** (`desktop/uinput_daemon.py`) creates the device(s) **before** Dota
+   launches and owns them for the session.
+3. `--device-cgroup-rule 'c 13:* rmw'` on `docker run` — without it libinput's `open(/dev/input/eventN)`
+   gets **EPERM** even on a 0666 node.
+4. dumb-udev mis-tags every virtual device `ID_INPUT_JOYSTICK`; `setup_uinput()` rewrites the udev
+   `ID_INPUT_*` tag per device (keyboard vs mouse) and a `MatchProduct "dota-"` InputClass
+   (`xorg-input.conf`) force-binds them to libinput.
+5. **Restart Xorg once** after the device appears so its startup enumeration claims it via libinput.
 
-- [ ] **Input injection:** `xdotool` (XTEST) keystrokes/clicks do **not** reach the Dota window
-      (Source 2 ignores synthetic X events). Next: a virtual **uinput** device (`/dev/uinput` +
-      `ydotool`), matching `docker-steam-headless`'s `ENABLE_EVDEV_INPUTS`. Working method: _(fill in)_
-- [ ] Exact **spectate-join** command. Candidate: `dota_spectate_game <WatchableGameID>` in the
-      `` ` `` console. Working command: _(fill in)_
-- [ ] Exact **camera-follow** command(s). Candidates: `dota_spectator_mode 1`, `spec_player 0`,
-      `dota_spectator_autofollow 1`. Working command: _(fill in)_
+Validated live: `xinput list` shows the devices as real keyboard/pointer; keystrokes reach Dota
+(`[InputSystem] Processing SDL events`, `xinput test-xi2` shows real KeyPress detail); an **absolute
+mouse** (`dota-vnc-mouse`, ABS_X/Y 0..32767 + `INPUT_PROP_POINTER`) maps the cursor 1:1 with no
+acceleration (injecting `200,150` lands exactly at 200,150). The same path also backs a **VNC input
+bridge** (`desktop/vnc_input_daemon.py` + x11vnc `-pipeinput`) so an operator's VNC mouse+keyboard
+reach Dota for manual runs (`v5_spectate.sh manual` / `input`).
+
+### Spectate-join — console join command does NOT exist; path is **GUI mouse automation** (decided 2026-06-24)
+The planned `dota_spectate_game <id>` is a **dead end — that command does not exist** (verified
+against Liquipedia's console-command list *and* by grepping this build's `libclient.so`/`libserver.so`;
+`dota_spectator_autofollow` is likewise absent). **No console command anywhere joins a live match by
+id** — every `dota_watch_*` token is Watch-tab UI/config tuning. Live spectating is **GC-mediated
+through the GUI** (DotaTV). The in-game **Watch tab is tournaments/replays only** — not friends.
+
+**Decision:** initiate a friend spectate by **automating the GUI** — open the friends panel,
+right-click the friend who is in a live match, click **Spectate** — driven by the uinput **mouse**
+(located via OCR-anchored clicks at fixed 1280×720, not hardcoded pixels). The native client then
+does the GC watch handshake, SDR ticket, connect, and **render** itself; we only click. This is
+**friend-spectate = team vision only** (Dota Plus, which the account has) — accepted for V1.
+
+Rejected alternative — **GC automation** (python-dota2 / raw `CMsgWatchGame`): it returns *data, not
+pixels* (can't render — the graphical client must still connect+render), needs a **second Dota GC
+session the account can't grant** while the renderer is playing, was already proven not to connect
+from a standalone python-steam session (V3, `GC ready=False`), isn't wired into python-dota2/node-dota2
+(`request_top_source_tv_games` only finds *top* games, not a friend's pub), and a bare console
+`connect` lacks the GC-issued SDR auth ticket. So it stays out (no `dota2` dep), consistent with V3.
+
+**The real (in-session) console commands** — usable only **after** a spectate has started, for camera
+control, all confirmed present in `libclient.so`: `dota_spectator_mode`, `spec_player <n>`,
+`spec_mode`, `spec_next`/`spec_prev`, `dota_spectator_hero_index`, `spec_track`, `spec_goto`.
+
+### Remaining (Task C copies the working recipe verbatim once proven)
+- [ ] Exact **GUI click path** to a friend spectate: open friends panel → locate friend (OCR) →
+      right-click → "Spectate". Working sequence: _(fill in from the manual run)_
+- [ ] Working **camera** command(s) from the real set above. Working command: _(fill in)_
 - [ ] **Spectator delay** observed (affects `stream_ready` timing); match-watchability gotchas.
-- [ ] Confirmed the captured `:99` frame is the **moving live match** (needs a fresh
-      `WatchableGameID` — re-run `v3_gc_matchid.py`). `v5-shots/v5_capture.mp4` + screenshots.
+- [ ] Confirmed the captured `:99` frame is the **moving live match** (needs a friend currently in a
+      live match — re-run `v3_gc_matchid.py` to confirm a fresh `WatchableGameID`).
+      `v5-shots/v5_capture.mp4` + screenshots.
+
+### Launch gating fix (2026-06-24)
+Dota must not launch until **this run's** GUI Steam logon is confirmed, or it shows **"LOST
+CONNECTION TO STEAM"** (no friends/account data). `connection_log.txt` is append-only across runs,
+so the old whole-file `grep "Logged On"` matched a stale logon and let Dota start too early.
+`v5_spectate.sh` now snapshots the log line count before launching Steam and only counts a logon
+added since (and requires the latest transition to be `Logged On`), with a settle delay; `up`/`manual`
+**abort** rather than launch Dota on an unconfirmed logon.
 
 Screenshots + capture: `/fard/steam/steamhome/v5-shots/`.
 
