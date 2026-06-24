@@ -14,7 +14,7 @@ containers). GPU host PCI address **0b:00.0** → Xorg **`PCI:11:0:0`**.
 | V2 Steam + Dota install via steamcmd | Dota installable into a named volume; update strategy | ✅ PASS (72G logical / 44G on ZFS, /fard/steam) |
 | V3 Match-ID resolution (python-steam rich presence) | Resolve a live match ID for a target steam_id | ✅ PASS (via rich presence, not GC) |
 | V4 Headless GUI-Steam login (QR + silent auto-login) | A worker can log the GUI Steam client in headless, once, then auto-login silently | ✅ PASS |
-| V5 Dota launch + spectate | Launch Dota headless (steamcmd-managed install), authenticate, render; join a live match + follow camera | ⏳ PARTIAL — launch + render + Steam auth + input path PASS; spectate now via **GUI mouse automation** (no console join command exists), against a live match — pending |
+| V5 Dota launch + spectate | Launch Dota headless (steamcmd-managed install), authenticate, render; join a live match | ✅ PASS (2026-06-24) — launch + render + Steam auth + input path + **GUI spectate** all proven; right-click friend → WATCH FRIEND LIVE → live match in **player view** (no console join command exists; no camera-follow needed) |
 | V6 FFmpeg x11grab → hevc_nvenc → SRT → mediamtx | NVENC on headless Xorg; SRT path to mediamtx | ✅ PASS to mediamtx (browser WebRTC leg = human check) |
 
 ---
@@ -233,7 +233,7 @@ desktop/*.sh}`. Screenshots: `/fard/steam/steamhome/v4-shots/`.
 
 ---
 
-## V5 — Dota launch + spectate — ⏳ PARTIAL (launch + render + auth PASS; spectate pending)
+## V5 — Dota launch + spectate — ✅ PASS (launch + render + auth + GUI spectate proven)
 
 Probe: `v5_spectate.sh {up|spectate|down}`. Reuses the V4 desktop stack + persisted silent login.
 
@@ -274,7 +274,7 @@ acceleration (injecting `200,150` lands exactly at 200,150). The same path also 
 bridge** (`desktop/vnc_input_daemon.py` + x11vnc `-pipeinput`) so an operator's VNC mouse+keyboard
 reach Dota for manual runs (`v5_spectate.sh manual` / `input`).
 
-### Spectate-join — console join command does NOT exist; path is **GUI mouse automation** (decided 2026-06-24)
+### Spectate-join — console join command does NOT exist; path is **GUI mouse automation** (✅ PROVEN 2026-06-24)
 The planned `dota_spectate_game <id>` is a **dead end — that command does not exist** (verified
 against Liquipedia's console-command list *and* by grepping this build's `libclient.so`/`libserver.so`;
 `dota_spectator_autofollow` is likewise absent). **No console command anywhere joins a live match by
@@ -294,18 +294,31 @@ from a standalone python-steam session (V3, `GC ready=False`), isn't wired into 
 (`request_top_source_tv_games` only finds *top* games, not a friend's pub), and a bare console
 `connect` lacks the GC-issued SDR auth ticket. So it stays out (no `dota2` dep), consistent with V3.
 
-**The real (in-session) console commands** — usable only **after** a spectate has started, for camera
-control, all confirmed present in `libclient.so`: `dota_spectator_mode`, `spec_player <n>`,
-`spec_mode`, `spec_next`/`spec_prev`, `dota_spectator_hero_index`, `spec_track`, `spec_goto`.
+**No in-session camera command is needed.** WATCH FRIEND LIVE lands directly in **player view** (the
+friend's own camera), which is the desired V1 output. (The real in-session camera commands —
+`dota_spectator_mode`, `spec_player <n>`, `spec_mode`, `spec_next`/`spec_prev`,
+`dota_spectator_hero_index`, `spec_track`, `spec_goto`, all confirmed in `libclient.so` — are left
+for a future free-camera/auto-follow mode, not V1.)
 
-### Remaining (Task C copies the working recipe verbatim once proven)
-- [ ] Exact **GUI click path** to a friend spectate: open friends panel → locate friend (OCR) →
-      right-click → "Spectate". Working sequence: _(fill in from the manual run)_
-- [ ] Working **camera** command(s) from the real set above. Working command: _(fill in)_
-- [ ] **Spectator delay** observed (affects `stream_ready` timing); match-watchability gotchas.
-- [ ] Confirmed the captured `:99` frame is the **moving live match** (needs a friend currently in a
-      live match — re-run `v3_gc_matchid.py` to confirm a fresh `WatchableGameID`).
-      `v5-shots/v5_capture.mp4` + screenshots.
+### Proven recipe (2026-06-24) — copied verbatim into `worker/dota_client.py` (Phase B)
+Driven end-to-end from a clean dashboard to a moving NVENC capture of the live match in player view
+(manual run 3.35 MB; fully-automated `gui_spectate.py spectate --target-name` 2.6 MB). Working path:
+- [x] **GUI click path:** friends panel is **docked open on the LEFT** (`IN DOTA (n)` list at the
+      top) → wheel **up to the top** (in-match friends are at the top; never down-scroll, it hides
+      them) → **OCR-locate** the friend's row (psm 11, 3× upscale) → **right-click** the row → context
+      menu (position is variable: over the left panel *or* to its right) → OCR the menu (inverted, 3×)
+      → click **WATCH FRIEND LIVE** (Dota+ low-latency, preferred) or **WATCH GAME** (delayed
+      fallback). First-login modals (`Update Required` non-fatal → OK, `Player Behavior Summary` →
+      close-X, `Party Invitation` → ESC, `Welcome to Dota Plus` → dismiss) are cleared first.
+- [x] **★ Dense-motion clicks are mandatory:** Panorama only registers a hover / opens a context menu
+      if the pointer **arrives via continuous motion** (~15 interpolated points). A teleport-then-click
+      reaches the X server but the UI does not react.
+- [x] **Camera:** none — player view is the landing state (no follow command).
+- [x] **Confirmed moving live match** in `v5-shots/v5_capture.mp4` (non-trivial NVENC render, not the
+      menu). Needs a friend currently in a live, watchable match (fresh `WatchableGameID` via
+      `v3_gc_matchid.py`).
+- [ ] **Spectator delay** under WATCH FRIEND LIVE vs WATCH GAME (affects `stream_ready` timing) —
+      not yet measured precisely; folded into the JOIN settle (~12 s) for now.
 
 ### Launch gating fix (2026-06-24)
 Dota must not launch until **this run's** GUI Steam logon is confirmed, or it shows **"LOST

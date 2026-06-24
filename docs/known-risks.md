@@ -22,7 +22,7 @@ Design consequence: there are **two auth artifacts** — the user's python-steam
 the `steam-data` volume). For V1 the spectator *is* the user's account, so no python-steam↔GUI
 handoff is exercised. (Match-ID resolution is rich presence, **not** a GC query — V3.)
 
-## ⚠️ Dota spectate initiation — mechanism corrected; GUI-automation (open)
+## ✅ RESOLVED: Dota spectate initiation — GUI automation, player view
 
 `steam -applaunch 570` can't see a `force_install_dir` install; Dota launches via the install's
 sniper wrapper (`run-in-sniper`) with the GUI client for auth — **validated: it authenticates and
@@ -36,8 +36,14 @@ tournaments/replays only). **Decision:** initiate a friend spectate by **automat
 (friends panel → right-click friend in a live match → Spectate) with the uinput mouse; the native
 client does the GC handshake/connect/render. This is **team-vision-only** (Dota Plus) — accepted for
 V1. GC automation (python-dota2) was rejected: it can't render, needs a second GC session the account
-can't grant, and was already proven not to connect (V3). The open item is the exact GUI click path +
-in-session camera commands (the real ones: `dota_spectator_mode`, `spec_player`, …). See
+can't grant, and was already proven not to connect (V3).
+
+**Resolved (2026-06-24, V5 PASS):** the full GUI path is proven end-to-end and ported into
+`worker/dota_client.py` — clear first-login modals → friends panel (docked open left) → OCR-locate
+the friend → right-click → **WATCH FRIEND LIVE** (Dota+, preferred) / **WATCH GAME** (fallback) →
+lands in **player view**, captured as a moving live render. **No in-session camera command is
+needed** (player view is the desired output). Key finding: Panorama only reacts to clicks whose
+pointer **arrives via continuous motion** (dense interpolated path), not a teleport. See
 [validation-results.md](validation-results.md) V5.
 
 ## ✅ RESOLVED: Headless Xorg inside Docker with NVIDIA
