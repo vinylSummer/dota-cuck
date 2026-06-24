@@ -11,6 +11,7 @@ dependencies = [
     "grpcio==1.48.2",
     "protobuf==3.20.3",
     "steam[client]==1.4.4",
+    "evdev==1.7.1",  # in-process uinput keyboard + absolute mouse for Dota GUI automation
 ]
 
 [dependency-groups]
