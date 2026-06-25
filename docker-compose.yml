@@ -1,0 +1,94 @@
+# V1 single-host stack: postgres + control plane + mediamtx + the GPU worker.
+# nginx runs on the HOST (TLS termination on :443), not in compose — see
+# nginx/nginx.conf and docs/deployment.md.
+#
+# The worker needs the NVIDIA Container Toolkit (--gpus) and a one-time Steam/Dota
+# bring-up; its image builds on the validated headless stack and must be validated
+# live on the GPU host (see docs/validation-results.md). Bring up the data plane
+# (postgres, control-plane, mediamtx) independently of the worker as needed.
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-dota}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-dota}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dota} -d ${POSTGRES_DB:-dota}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  control-plane:
+    build: ./control-plane
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-dota}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-dota}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+      CREDENTIAL_PEPPER: ${CREDENTIAL_PEPPER:?set CREDENTIAL_PEPPER}
+      HTTP_LISTEN_ADDR: ":42000"
+      GRPC_LISTEN_ADDR: ":42010"
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://dota.example.com}
+    ports:
+      # Bound to localhost; nginx (host) proxies the public 443 to these.
+      - "127.0.0.1:42000:42000" # HTTP API + WS
+      - "127.0.0.1:42010:42010" # gRPC (worker stream)
+    restart: unless-stopped
+
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    volumes:
+      - ./mediamtx/mediamtx.yml:/mediamtx.yml:ro
+    ports:
+      - "127.0.0.1:8889:8889" # WebRTC/WHEP (nginx proxies /webrtc/* here)
+      - "8890:8890/udp"       # SRT ingest from the worker's FFmpeg
+    restart: unless-stopped
+
+  worker:
+    # Builds on the validated headless GPU + Steam + Dota image. Build that base
+    # first (scripts/validation/Dockerfile.{xtest,steam}); see worker/Dockerfile.
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    depends_on:
+      - control-plane
+      - mediamtx
+    environment:
+      CONTROL_PLANE_ADDR: control-plane:42010
+      WORKER_DOTA_BRINGUP: "1"
+      DISPLAY: ":99"
+      SCREEN: "1280x720"
+      HOME: /fard/steam/steamhome
+      MEDIAMTX_SRT_HOST: mediamtx
+      MEDIAMTX_SRT_PORT: "8890"
+      # The Container Toolkit injects the driver/GLX/NVENC libs for these caps.
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: all
+    # The persisted Steam/Dota install + GUI-Steam login state (bind to the ZFS
+    # dataset on the host; the worker uid 1000 owns it — see Dockerfile.steam).
+    volumes:
+      - /fard/steam:/fard/steam
+    shm_size: "2gb"
+    devices:
+      - /dev/uinput
+    device_cgroup_rules:
+      - "c 13:* rmw" # /dev/input/* for the uinput devices
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, compute, video, graphics, utility]
+    restart: unless-stopped
+
+volumes:
+  pgdata:
