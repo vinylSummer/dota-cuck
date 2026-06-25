@@ -16,6 +16,7 @@ type Store struct {
 	pool          *pgxpool.Pool
 	Users         *UserStore
 	SteamAccounts *SteamAccountStore
+	Sessions      *SessionStore
 }
 
 // New opens a pgx pool against databaseURL and verifies connectivity with a
@@ -33,6 +34,7 @@ func New(ctx context.Context, databaseURL string) (*Store, error) {
 		pool:          pool,
 		Users:         &UserStore{pool: pool},
 		SteamAccounts: &SteamAccountStore{pool: pool},
+		Sessions:      &SessionStore{pool: pool},
 	}, nil
 }
 
