@@ -233,9 +233,15 @@ paths:
           schema:
             $ref: '#/definitions/api.ErrorResponse'
         "409":
-          description: worker busy
+          description: worker busy / no steam account
           schema:
             $ref: '#/definitions/api.ErrorResponse'
+        "502":
+          description: worker unavailable
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      security:
+      - BearerAuth: []
       summary: Start spectating a friend
       tags:
       - sessions
@@ -256,6 +262,12 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/api.ErrorResponse'
+        "502":
+          description: worker unavailable
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      security:
+      - BearerAuth: []
       summary: Stop spectating
       tags:
       - sessions
@@ -277,6 +289,8 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/api.ErrorResponse'
+      security:
+      - BearerAuth: []
       summary: Get session status (webrtc_url present once WATCHING)
       tags:
       - sessions
@@ -309,6 +323,12 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/api.ErrorResponse'
+        "502":
+          description: worker unavailable
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      security:
+      - BearerAuth: []
       summary: Submit a Steam Guard code for a starting session
       tags:
       - sessions
