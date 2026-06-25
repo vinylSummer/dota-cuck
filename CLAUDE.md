@@ -248,7 +248,7 @@ control-plane/
   gen/                  Generated protobuf Go code (do not edit)
 
 worker/                 uv project (Python 3.10); see docs/worker.md
-  agent.py grpc_client.py state_machine.py steam_client.py dota_client.py ffmpeg.py
+  agent.py grpc_client.py state_machine.py steam_client.py steam_gui.py dota_client.py ffmpeg.py
   xorg/xorg.conf  gen/  pyproject.toml  .python-version
 
 frontend/               Vite + React SPA (Vitest + MSW tests)

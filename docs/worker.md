@@ -83,8 +83,9 @@ GUI client does the GC handshake itself; GC automation was rejected — see V5 /
 | `agent.py` | Entry point, state-machine driver, command handlers, Friends/Link/guard event mapping |
 | `grpc_client.py` | Bidirectional stream + `CommandDispatcher` (pure command routing) |
 | `state_machine.py` | Pure worker state-machine table |
-| `steam_client.py` | Warm python-steam session, refresh-token acquisition (QR/credentials handshake) + token CM login, interactive Steam Guard, `derive_status` (friends), rich-presence `WatchableGameID` match-ID resolution (`resolve_match_id` / `extract_watchable_match_id`) |
-| `dota_client.py` | GUI Dota automation — launch (sniper wrapper); spectate via friends-panel right-click→Spectate (uinput mouse + OCR); camera via in-session console commands (uinput keyboard) (stub) |
+| `steam_client.py` | Warm python-steam session, refresh-token acquisition (QR/credentials handshake) + token CM login, interactive Steam Guard, `derive_status` (friends), rich-presence `WatchableGameID` match-ID resolution (`resolve_match_id` / `extract_watchable_match_id`), `persona_name` (cached, for GUI row matching) |
+| `steam_gui.py` | GUI Steam client bring-up — silent auto-login (`dbus-run-session … steam`), wait for this run's CM logon before Dota launches; pure `is_logged_on` connection-log parser |
+| `dota_client.py` | GUI Dota automation — in-process uinput devices (evdev), launch (sniper wrapper) + `wait_for_dota_window`, OCR-gated spectate via friends-panel right-click→WATCH FRIEND LIVE/GAME → player view (no camera-follow); pure decision logic (`classify_state`, `find_text_box`, …) split out for tests |
 | `ffmpeg.py` | FFmpeg subprocess management (stub) |
 | `xorg/xorg.conf` | Headless NVIDIA display config (fill in BusID) |
 | `gen/` | Generated protobuf Python code — do not edit |
