@@ -76,6 +76,20 @@ func main() {
 	// Credential keys live as long as the token they were minted for.
 	keys := auth.NewKeyCache(sessionTTL)
 
+	// Apply pending migrations on boot (idempotent), so a fresh compose stack
+	// comes up with the schema in place without a separate migrate step.
+	migrationsDir := env("MIGRATIONS_DIR", "db/migrations")
+	migCtx, migCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	applied, err := store.Migrate(migCtx, databaseURL, migrationsDir)
+	migCancel()
+	if err != nil {
+		log.Error("apply migrations", "err", err)
+		os.Exit(1)
+	}
+	if len(applied) > 0 {
+		log.Info("applied migrations", "count", len(applied), "migrations", applied)
+	}
+
 	dbCtx, dbCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	db, err := store.New(dbCtx, databaseURL)
 	dbCancel()
