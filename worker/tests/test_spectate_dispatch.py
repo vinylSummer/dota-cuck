@@ -79,6 +79,25 @@ class FakeSteamGui:
             raise self.exc
 
 
+class FakeFFmpeg:
+    def __init__(self, start_exc=None, events=None, srt_url="srt://mediamtx:8890?streamid=publish:live/match"):
+        self.start_exc = start_exc
+        self.srt_url = srt_url
+        self.started = False
+        self.events = events if events is not None else []
+
+    def start(self):
+        self.events.append("ffmpeg_start")
+        if self.start_exc:
+            raise self.start_exc
+        self.started = True
+        return self.srt_url
+
+    def stop(self):
+        self.events.append("ffmpeg_stop")
+        self.started = False
+
+
 class CapturingClient:
     def __init__(self):
         self.sent = []
@@ -87,8 +106,9 @@ class CapturingClient:
         self.sent.append(event)
 
 
-def make_agent(session, dota=None, gui=None):
-    agent = Agent("addr:0", "worker-1", steam_session=session, dota_client=dota, steam_gui=gui)
+def make_agent(session, dota=None, gui=None, ffmpeg=None):
+    agent = Agent("addr:0", "worker-1", steam_session=session, dota_client=dota,
+                  steam_gui=gui, ffmpeg=ffmpeg)
     agent._client = CapturingClient()
     agent.state = sm.State.IDLE  # IDLE -> STARTING is the valid StartSpectate transition
     return agent
@@ -222,3 +242,57 @@ def test_dota_launch_failure_is_fatal_and_skips_spectate():
     assert dota.spectated == []  # spectate never reached
     [err] = _events(agent, "error")
     assert err.error.code == "DOTA_LAUNCH_FAILED"
+
+
+# --- step 9: FFmpeg + StreamStarted ------------------------------------------
+
+
+def test_spectate_starts_stream_and_advances_to_spectating():
+    session = FakeSession(match_id=29885123456)
+    dota = FakeDota()
+    ffmpeg = FakeFFmpeg()
+    agent = make_agent(session, dota, ffmpeg=ffmpeg)
+
+    _start(agent)
+
+    assert ffmpeg.started
+    [started] = _events(agent, "stream_started")
+    assert started.stream_started.srt_url == "srt://mediamtx:8890?streamid=publish:live/match"
+    assert agent.state == sm.State.SPECTATING
+    assert _events(agent, "error") == []
+
+
+def test_no_ffmpeg_stays_in_starting():
+    session = FakeSession(match_id=29885123456)
+    agent = make_agent(session, FakeDota(), ffmpeg=None)
+
+    _start(agent)
+
+    assert _events(agent, "stream_started") == []
+    assert agent.state == sm.State.STARTING
+
+
+def test_ffmpeg_start_failure_is_fatal_and_tears_down():
+    session = FakeSession(match_id=29885123456)
+    ffmpeg = FakeFFmpeg(start_exc=RuntimeError("nvenc init failed"))
+    agent = make_agent(session, FakeDota(), ffmpeg=ffmpeg)
+
+    _start(agent)
+
+    [err] = _events(agent, "error")
+    assert err.error.code == "STREAM_START_FAILED"
+    assert "ffmpeg_stop" in ffmpeg.events  # _fail_spectate tore down the partial stream
+    assert agent.state == sm.State.STOPPING
+
+
+def test_stop_spectate_stops_stream_and_returns_to_idle():
+    session = FakeSession(match_id=29885123456)
+    ffmpeg = FakeFFmpeg()
+    agent = make_agent(session, FakeDota(), ffmpeg=ffmpeg)
+    _start(agent)
+    assert agent.state == sm.State.SPECTATING
+
+    agent._on_stop_spectate(pb.StopSpectate())
+
+    assert ffmpeg.events[-1] == "ffmpeg_stop"
+    assert agent.state == sm.State.IDLE

@@ -16,6 +16,7 @@ import uuid
 
 import state_machine as sm
 from dota_client import DotaClient, SpectateError
+from ffmpeg import FFmpegPipeline
 from grpc_client import CommandDispatcher, GrpcClient
 from steam_client import LoginError, SteamGuardRequired, SteamSession
 from steam_gui import SteamGui
@@ -134,6 +135,12 @@ def match_id_resolved_event(match_id: int, steam_id: str) -> pb.WorkerEvent:
     )
 
 
+def stream_started_event(srt_url: str) -> pb.WorkerEvent:
+    """Build a StreamStarted event carrying the SRT URL the encoder published to. Pure,
+    so the proto mapping is unit-tested."""
+    return pb.WorkerEvent(stream_started=pb.StreamStarted(srt_url=srt_url))
+
+
 def steam_guard_event(request_id: str, guard_type: str) -> pb.WorkerEvent:
     """Build a SteamGuardRequired event correlated to its login request."""
     return pb.WorkerEvent(
@@ -152,6 +159,7 @@ class Agent:
         steam_session: SteamSession | None = None,
         dota_client: DotaClient | None = None,
         steam_gui: SteamGui | None = None,
+        ffmpeg: FFmpegPipeline | None = None,
     ) -> None:
         self.state = sm.State.STOPPED
         self._steam = steam_session if steam_session is not None else SteamSession()
@@ -162,6 +170,10 @@ class Agent:
         # worker performs the full STARTING bring-up itself.
         self._dota = dota_client
         self._steam_gui = steam_gui
+        # The FFmpeg encoder (x11grab -> hevc_nvenc -> SRT -> mediamtx). Optional:
+        # with no pipeline wired the spectate path stops once the match renders and
+        # never emits StreamStarted (so the session stays STARTING).
+        self._ffmpeg = ffmpeg
         dispatcher = CommandDispatcher(
             on_start_spectate=self._on_start_spectate,
             on_stop_spectate=self._on_stop_spectate,
@@ -263,19 +275,45 @@ class Agent:
             return
         log.info("StartSpectate: live spectate established (player view)")
 
-        # --- step 9 continues here: start FFmpeg (x11grab -> hevc_nvenc -> SRT),
-        # then emit StreamStarted to drive STARTING -> SPECTATING. ---
+        # --- step 9: start the FFmpeg encoder (x11grab -> hevc_nvenc -> SRT ->
+        # mediamtx), then emit StreamStarted to drive STARTING -> SPECTATING. ---
+        if self._ffmpeg is None:
+            log.info("StartSpectate: no FFmpeg pipeline wired; stream not started "
+                     "(session stays STARTING)")
+            return
+        try:
+            srt_url = self._ffmpeg.start()
+        except Exception as exc:  # noqa: BLE001 — any encoder failure is fatal
+            log.warning("StartSpectate FFmpeg start failed: %s", exc)
+            self._fail_spectate("STREAM_START_FAILED", str(exc))
+            return
+        self._client.send(stream_started_event(srt_url))
+        self._advance(sm.Event.STREAM_STARTED)  # STARTING -> SPECTATING
+        log.info("StartSpectate: streaming to %s", srt_url)
 
     def _fail_spectate(self, code: str, message: str) -> None:
-        """Emit a fatal ErrorEvent and drive STARTING → STOPPING."""
+        """Emit a fatal ErrorEvent and drive STARTING → STOPPING. Tears down a
+        partially-started stream so a failed session leaves no orphaned encoder."""
+        self._teardown_stream()
         self._client.send(
             pb.WorkerEvent(error=pb.ErrorEvent(code=code, message=message, fatal=True))
         )
         self._advance(sm.Event.FATAL_ERROR)
 
+    def _teardown_stream(self) -> None:
+        """Stop the FFmpeg encoder if running. Best-effort; never raises."""
+        if self._ffmpeg is None:
+            return
+        try:
+            self._ffmpeg.stop()
+        except Exception as exc:  # noqa: BLE001 — teardown must not mask the original outcome
+            log.warning("FFmpeg stop failed: %s", exc)
+
     def _on_stop_spectate(self, _cmd: pb.StopSpectate) -> None:
         log.info("StopSpectate")
-        self._advance(sm.Event.STOP_SPECTATE)
+        self._advance(sm.Event.STOP_SPECTATE)  # SPECTATING/STARTING -> STOPPING
+        self._teardown_stream()
+        self._advance(sm.Event.CLEANUP_DONE)   # STOPPING -> IDLE
 
     def _on_steam_guard(self, cmd: pb.SubmitSteamGuardCode) -> None:
         log.info("SubmitSteamGuardCode: code=%s", "*" * len(cmd.code))
@@ -359,14 +397,15 @@ def main() -> None:
     # desktop/Xorg/uinput container stack, so it's opt-in until that lands (step 11).
     # WORKER_DOTA_BRINGUP=1 wires the GUI automation; otherwise the worker serves
     # friends/link/match-id and stops spectate at the handoff.
-    dota = gui = None
+    dota = gui = ffmpeg = None
     if os.environ.get("WORKER_DOTA_BRINGUP") == "1":
         dota = DotaClient()
         dota.setup()  # create the uinput devices before Dota launches (Source 2 enumerates at start)
         gui = SteamGui()
-        log.info("Dota bring-up enabled (GUI Steam + spectate automation)")
+        ffmpeg = FFmpegPipeline()
+        log.info("Dota bring-up enabled (GUI Steam + spectate automation + FFmpeg)")
 
-    Agent(address, worker_id, dota_client=dota, steam_gui=gui).run()
+    Agent(address, worker_id, dota_client=dota, steam_gui=gui, ffmpeg=ffmpeg).run()
 
 
 if __name__ == "__main__":
