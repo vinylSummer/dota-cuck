@@ -16,6 +16,7 @@ type Server struct {
 	log     *slog.Logger
 	pending *pendingFriends
 	links   *pendingLinks
+	obs     SessionObserver // session-lifecycle events; nil until SetSessionObserver
 }
 
 func NewServer(reg *Registry, log *slog.Logger) *Server {
@@ -67,20 +68,39 @@ func (s *Server) handle(w *Worker, ev *pb.WorkerEvent) {
 		s.log.Info("worker ready", "worker_id", w.ID)
 	case *pb.WorkerEvent_StatusUpdate:
 		s.log.Info("worker status", "worker_id", w.ID, "state", p.StatusUpdate.GetState())
+		// A worker reaching IDLE while a session is STOPPING closes it out.
+		if p.StatusUpdate.GetState() == pb.WorkerState_IDLE && s.obs != nil {
+			s.obs.OnWorkerIdle()
+		}
 	case *pb.WorkerEvent_SteamGuard:
 		s.log.Info("steam guard required", "worker_id", w.ID,
 			"type", p.SteamGuard.GetGuardType(), "request_id", p.SteamGuard.GetRequestId())
-		s.links.guard(p.SteamGuard.GetRequestId(), p.SteamGuard.GetGuardType())
+		// A request id correlates an account link; an empty one is the
+		// session-driven spectate login (V1), routed to the session observer.
+		if reqID := p.SteamGuard.GetRequestId(); reqID != "" {
+			s.links.guard(reqID, p.SteamGuard.GetGuardType())
+		} else if s.obs != nil {
+			s.obs.OnSteamGuard(guardTypeString(p.SteamGuard.GetGuardType()))
+		}
 	case *pb.WorkerEvent_QrChallenge:
 		s.log.Info("steam qr challenge", "worker_id", w.ID, "request_id", p.QrChallenge.GetRequestId())
 		s.links.challenge(p.QrChallenge.GetRequestId(), p.QrChallenge.GetChallengeUrl())
 	case *pb.WorkerEvent_MatchIdResolved:
 		s.log.Info("match id resolved", "worker_id", w.ID, "match_id", p.MatchIdResolved.GetMatchId())
+		if s.obs != nil {
+			s.obs.OnMatchIDResolved(p.MatchIdResolved.GetMatchId())
+		}
 	case *pb.WorkerEvent_StreamStarted:
 		s.log.Info("stream started", "worker_id", w.ID, "srt_url", p.StreamStarted.GetSrtUrl())
+		if s.obs != nil {
+			s.obs.OnStreamStarted(p.StreamStarted.GetSrtUrl())
+		}
 	case *pb.WorkerEvent_Error:
 		s.log.Warn("worker error", "worker_id", w.ID,
 			"code", p.Error.GetCode(), "message", p.Error.GetMessage(), "fatal", p.Error.GetFatal())
+		if p.Error.GetFatal() && s.obs != nil {
+			s.obs.OnFatalError(p.Error.GetCode(), p.Error.GetMessage())
+		}
 	case *pb.WorkerEvent_FriendsResult:
 		s.pending.deliver(p.FriendsResult)
 	case *pb.WorkerEvent_LinkResult:
