@@ -352,6 +352,26 @@ class DotaClient:
             stderr=subprocess.STDOUT,
         )
 
+    def _dota_window_present(self) -> bool:
+        r = subprocess.run(
+            ["bash", "-lc", "xdotool search --class dota2 >/dev/null 2>&1"],
+            check=False, env=self._env,
+        )
+        return r.returncode == 0
+
+    def wait_for_dota_window(self, timeout_seconds: float = 180.0,
+                             poll_seconds: float = 5.0) -> None:
+        """Block until the Dota window appears on :99 after launch_dota(). The sniper chain
+        (srt-bwrap -> pv-adverb -> dota.sh) plus the Vulkan pipeline compile takes ~tens of seconds,
+        so the timeout is generous. Raises SpectateError(DOTA_LAUNCH_FAILED) on timeout."""
+        deadline = time.time() + timeout_seconds
+        while time.time() < deadline:
+            if self._dota_window_present():
+                log.info("Dota window present")
+                return
+            time.sleep(poll_seconds)
+        raise SpectateError("DOTA_LAUNCH_FAILED", "Dota window never appeared after launch")
+
     # --- screenshots + OCR (subprocess; same preprocess as the harness ocr.sh) ---
 
     def _screenshot(self, name: str) -> str:

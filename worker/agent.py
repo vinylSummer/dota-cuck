@@ -18,6 +18,7 @@ import state_machine as sm
 from dota_client import DotaClient, SpectateError
 from grpc_client import CommandDispatcher, GrpcClient
 from steam_client import LoginError, SteamGuardRequired, SteamSession
+from steam_gui import SteamGui
 
 _GEN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gen")
 if _GEN not in sys.path:
@@ -150,13 +151,17 @@ class Agent:
         worker_id: str,
         steam_session: SteamSession | None = None,
         dota_client: DotaClient | None = None,
+        steam_gui: SteamGui | None = None,
     ) -> None:
         self.state = sm.State.STOPPED
         self._steam = steam_session if steam_session is not None else SteamSession()
-        # The Dota GUI automation. Optional in V1: until the GUI-Steam-login + Dota
-        # launch bring-up is wired into the worker (step 8/11, shell-validated), a
-        # worker with no DotaClient resolves the match id then stops at the handoff.
+        # The Dota GUI automation and the GUI Steam bring-up. Both optional in V1: a
+        # worker with no DotaClient resolves the match id then stops at the handoff;
+        # with a DotaClient but no SteamGui it drives spectate against an
+        # already-running Dota (the harness brings Steam/Dota up). With both, the
+        # worker performs the full STARTING bring-up itself.
         self._dota = dota_client
+        self._steam_gui = steam_gui
         dispatcher = CommandDispatcher(
             on_start_spectate=self._on_start_spectate,
             on_stop_spectate=self._on_stop_spectate,
@@ -223,6 +228,28 @@ class Agent:
         except Exception as exc:  # noqa: BLE001 — non-fatal; spectate will fail to locate
             target_name = ""
             log.warning("StartSpectate persona-name lookup failed: %s", exc)
+
+        # Full worker bring-up (only when a SteamGui is wired): hand the account from
+        # the warm python-steam session to the GUI Steam client, then launch Dota to
+        # the dashboard. Without it, Dota is assumed already up (the harness path).
+        if self._steam_gui is not None:
+            try:
+                self._steam.logout()  # drop the warm session before GUI Steam takes the account
+                self._steam_gui.ensure_logged_in()
+            except Exception as exc:  # noqa: BLE001 — any login failure is fatal
+                log.warning("StartSpectate GUI Steam login failed: %s", exc)
+                self._fail_spectate("STEAM_GUI_LOGIN_FAILED", str(exc))
+                return
+            try:
+                self._dota.launch_dota()
+                self._dota.wait_for_dota_window()
+            except SpectateError as exc:
+                self._fail_spectate(exc.code, str(exc))
+                return
+            except Exception as exc:  # noqa: BLE001 — any launch failure is fatal
+                log.warning("StartSpectate Dota launch failed: %s", exc)
+                self._fail_spectate("DOTA_LAUNCH_FAILED", str(exc))
+                return
 
         try:
             self._dota.spectate(target_name)
@@ -327,7 +354,19 @@ def main() -> None:
     address = os.environ.get("CONTROL_PLANE_ADDR", "control-plane:42010")
     worker_id = os.environ.get("WORKER_ID", str(uuid.uuid4()))
     log.info("worker %s starting", worker_id)
-    Agent(address, worker_id).run()
+
+    # Full Dota bring-up (GUI Steam login + launch + GUI spectate) requires the
+    # desktop/Xorg/uinput container stack, so it's opt-in until that lands (step 11).
+    # WORKER_DOTA_BRINGUP=1 wires the GUI automation; otherwise the worker serves
+    # friends/link/match-id and stops spectate at the handoff.
+    dota = gui = None
+    if os.environ.get("WORKER_DOTA_BRINGUP") == "1":
+        dota = DotaClient()
+        dota.setup()  # create the uinput devices before Dota launches (Source 2 enumerates at start)
+        gui = SteamGui()
+        log.info("Dota bring-up enabled (GUI Steam + spectate automation)")
+
+    Agent(address, worker_id, dota_client=dota, steam_gui=gui).run()
 
 
 if __name__ == "__main__":
