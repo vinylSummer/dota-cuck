@@ -291,8 +291,12 @@ worker section) and **wired into `steam_client.py`** (`resolve_match_id` /
 `internal/sessions` (a `Manager` over the `state.go` machine) which sends StartSpectate/StopSpectate
 to the worker, reacts to its `StreamStarted`/`StatusUpdate IDLE`/`ErrorEvent`/`MatchIdResolved`/
 session `SteamGuardRequired` events, persists rows (`SessionStore`), and pushes `session_state`/
-`stream_ready`/`error`/`steam_guard` over WS. Steps 11–12 (deployment) remain and
-are greenfield (no `docker-compose.yml`, Dockerfiles, or `nginx.conf` yet). Known-risks
+`stream_ready`/`error`/`steam_guard` over WS. **Steps 11–12 (deployment) are scaffolded:**
+`docker-compose.yml` (postgres + control-plane + mediamtx + GPU worker), `control-plane/Dockerfile`
+(distroless Go) with **boot-time idempotent migrations** (`store.Migrate`), `worker/Dockerfile`
+(on the validated `dota-steam` base + supervisord), `mediamtx/mediamtx.yml`, and `nginx/nginx.conf`
+(host TLS + proxy). The data plane is reviewable/testable; the **worker GPU image needs live
+validation on the server** (uinput device-enumeration ordering — see deployment.md). Known-risks
 have been validated live on the server (see [docs/validation-results.md](docs/validation-results.md)):
 V1 headless Xorg/NVIDIA, V2 Dota install, V3 match-ID, V6 NVENC/SRT, and **V4 headless GUI-Steam
 QR login + silent auto-login** all pass; **V5** has Dota launch + render + Steam auth + the **input
@@ -321,8 +325,11 @@ uinput mouse (team-vision-only via Dota Plus; GC automation rejected — see
 9. Worker FFmpeg pipeline — x11grab → hevc_nvenc → SRT → mediamtx
 10. Frontend — Login, Friends, Watch pages, SteamGuardModal/AccountLink, WebSocket integration;
     decision-logic unit tests (Vitest + MSW) ✓
-11. Docker Compose — wire all services, GPU config, volume strategy
-12. nginx + TLS — final external deployment
+11. Docker Compose — `docker-compose.yml` (postgres + control-plane + mediamtx + GPU worker),
+    `control-plane/Dockerfile` (+ boot migrations), `worker/Dockerfile` (on `dota-steam` +
+    supervisord) ✓ scaffolded; **worker GPU image needs live validation** (uinput ordering)
+12. nginx + TLS — `nginx/nginx.conf` (host TLS + `/api` `/ws` `/webrtc` proxy + static SPA) ✓
+    written; certbot cert issuance + live bring-up on the server remain
 
 Before the worker spectate path (steps 7–9), validate the items in
 [docs/known-risks.md](docs/known-risks.md) on the real server — results recorded in

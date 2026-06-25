@@ -35,27 +35,44 @@ Accepts the SRT stream from the worker's FFmpeg and outputs WebRTC to the browse
 
 ## nginx (host, not dockerized)
 
+Config at `nginx/nginx.conf` (a site block; certbot fills in the cert paths).
+
 - TLS termination (certbot, `dota.example.com:443`)
 - Proxy rules:
-  - `/api/*` → control plane HTTP `:42000`
-  - `/ws` → control plane WebSocket `:42001`
-  - `/webrtc/*` → mediamtx `:42002`
-- Serves the static React build from `/usr/share/nginx/html`
+  - `/api/*` → control plane HTTP `127.0.0.1:42000`
+  - `/ws` → control plane WebSocket `127.0.0.1:42000` (same server, Upgrade headers)
+  - `/webrtc/*` → mediamtx WHEP `127.0.0.1:8889` (the `/webrtc/` prefix is stripped,
+    mapping `/webrtc/live/match` → mediamtx `/live/match`)
+- Serves the static React build (`cd frontend && npm run build`) from `/usr/share/nginx/html`
 
 ## Docker Compose service map
 
 ```
 docker-compose.yml
-├── postgres        image postgres:18; volume pgdata
-├── control-plane   build ./control-plane; depends_on postgres
-│                   env: DATABASE_URL, JWT_SECRET, CREDENTIAL_PEPPER, GRPC_LISTEN_ADDR
-├── worker          build ./worker; depends_on control-plane, mediamtx
-│                   env: CONTROL_PLANE_ADDR, DISPLAY=:99
-│                   volumes: steam-data (Dota install, Steam userdata, GUI Steam login state)
-│                   deploy.resources.reservations.devices: nvidia [gpu, compute, video]
-└── mediamtx        image bluenviron/mediamtx:latest; config ./mediamtx/mediamtx.yml
-nginx runs on the host on 443 (not in compose).
+├── postgres        image postgres:18; volume pgdata; healthcheck (pg_isready)
+├── control-plane   build ./control-plane (distroless Go binary); depends_on postgres healthy
+│                   env: DATABASE_URL (from POSTGRES_*), JWT_SECRET, CREDENTIAL_PEPPER,
+│                        PUBLIC_BASE_URL, HTTP/GRPC_LISTEN_ADDR
+│                   applies db/migrations on boot (idempotent; store.Migrate)
+│                   ports 127.0.0.1:42000 (HTTP/WS) + 42010 (gRPC), nginx proxies in
+├── mediamtx        image bluenviron/mediamtx:latest; config ./mediamtx/mediamtx.yml
+│                   ports 127.0.0.1:8889 (WHEP) + 8890/udp (SRT ingest)
+└── worker          build worker/Dockerfile; depends_on control-plane, mediamtx
+                    env: CONTROL_PLANE_ADDR, WORKER_DOTA_BRINGUP=1, DISPLAY=:99,
+                         MEDIAMTX_SRT_HOST/PORT, NVIDIA_DRIVER_CAPABILITIES=all
+                    volume /fard/steam (Dota install + GUI Steam login state)
+                    --gpus (deploy.resources nvidia [gpu,compute,video,graphics,utility]),
+                    --device /dev/uinput, --shm-size 2g
+nginx runs on the host on 443 (not in compose; nginx/nginx.conf).
 ```
+
+**Worker image.** `worker/Dockerfile` builds **on the validated headless stack**
+(`dota-steam`, from `scripts/validation/Dockerfile.{xtest,steam}` — build those first), adding the
+uv worker project and a supervisord (`worker/deploy/supervisord.conf`) that brings up the desktop
+(udev → dbus → Xorg :99 → Xfce, + optional VNC for the one-time Steam login) and runs the worker
+agent. ⚠ **Needs live GPU validation**: the uinput device-enumeration ordering (devices must exist
+before Xorg binds them via libinput) is proven in the harness via standalone daemons + an Xorg
+restart; wiring it to the worker's in-process `DotaClient` devices must be validated on the server.
 
 The worker container needs a custom `xorg.conf` with the RTX 3090 `BusID` for headless
 GPU rendering. The BusID must match the host PCI address (`nvidia-smi` or
