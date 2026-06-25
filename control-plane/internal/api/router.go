@@ -84,6 +84,7 @@ type Server struct {
 	steamAccounts SteamAccountStore
 	friends       FriendsProvider
 	links         LinkProvider
+	sessions      SessionProvider
 	hasher        *auth.Hasher
 	tokens        *auth.TokenManager
 	keys          *auth.KeyCache
@@ -102,6 +103,7 @@ type Deps struct {
 	SteamAccounts SteamAccountStore
 	Friends       FriendsProvider
 	Links         LinkProvider
+	Sessions      SessionProvider
 	Hasher        *auth.Hasher
 	Tokens        *auth.TokenManager
 	Keys          *auth.KeyCache
@@ -114,6 +116,7 @@ func NewServer(d Deps) *Server {
 		steamAccounts: d.SteamAccounts,
 		friends:       d.Friends,
 		links:         d.Links,
+		sessions:      d.Sessions,
 		hasher:        d.Hasher,
 		tokens:        d.Tokens,
 		keys:          d.Keys,

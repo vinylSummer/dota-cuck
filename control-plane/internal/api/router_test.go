@@ -11,39 +11,6 @@ func testRouter(t *testing.T) http.Handler {
 	return srv.Router()
 }
 
-// testRouterWithToken returns a router and a valid bearer token for it.
-func testRouterWithToken(t *testing.T) (http.Handler, string) {
-	srv, _ := newTestServer(t)
-	token, err := srv.tokens.Issue("user-1")
-	if err != nil {
-		t.Fatalf("issue token: %v", err)
-	}
-	return srv.Router(), token
-}
-
-// Routes for not-yet-built features must be registered (501 = handler reached,
-// not 404). Auth routes are implemented and covered in auth_test.go.
-func TestDocumentedRoutesReturn501(t *testing.T) {
-	// Authenticated stubs (require a token to reach the handler).
-	authed := []struct{ method, path string }{
-		{http.MethodPost, "/api/sessions"},
-		{http.MethodGet, "/api/sessions/abc"},
-		{http.MethodDelete, "/api/sessions/abc"},
-		{http.MethodPost, "/api/sessions/abc/steamguard"},
-	}
-
-	router, token := testRouterWithToken(t)
-	for _, rt := range authed {
-		req := httptest.NewRequest(rt.method, rt.path, nil)
-		req.Header.Set("Authorization", "Bearer "+token)
-		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, req)
-		if rec.Code != http.StatusNotImplemented {
-			t.Errorf("%s %s: status %d, want 501", rt.method, rt.path, rec.Code)
-		}
-	}
-}
-
 // Authenticated routes reject a missing or invalid token with 401.
 func TestProtectedRoutesRequireAuth(t *testing.T) {
 	router := testRouter(t)

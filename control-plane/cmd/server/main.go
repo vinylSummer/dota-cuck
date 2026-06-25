@@ -23,6 +23,7 @@ import (
 	pb "github.com/vinylSummer/dota-cuck/gen/spectator/v1"
 	"github.com/vinylSummer/dota-cuck/internal/api"
 	"github.com/vinylSummer/dota-cuck/internal/auth"
+	"github.com/vinylSummer/dota-cuck/internal/sessions"
 	"github.com/vinylSummer/dota-cuck/internal/store"
 	"github.com/vinylSummer/dota-cuck/internal/workers"
 	"google.golang.org/grpc"
@@ -90,6 +91,21 @@ func main() {
 	pb.RegisterControlPlaneServiceServer(grpcServer, workerSrv)
 
 	hub := api.NewHub(log)
+
+	// The session manager drives the spectate lifecycle: it sends commands to the
+	// worker (workerSrv), persists rows (db.Sessions), pushes WS updates (hub via
+	// SessionBus), and reacts to worker stream events (registered as the observer).
+	// publicBaseURL builds each session's WHEP URL from the worker's SRT URL.
+	publicBaseURL := env("PUBLIC_BASE_URL", "https://dota.example.com")
+	sessionMgr := sessions.NewManager(sessions.Deps{
+		Cmd:        workerSrv,
+		Bus:        api.NewSessionBus(hub),
+		Store:      db.Sessions,
+		Log:        log,
+		WebRTCBase: publicBaseURL,
+	})
+	workerSrv.SetSessionObserver(sessionMgr)
+
 	httpServer := &http.Server{
 		Addr: httpAddr,
 		Handler: api.NewServer(api.Deps{
@@ -98,6 +114,7 @@ func main() {
 			SteamAccounts: db.SteamAccounts,
 			Friends:       friendsProvider{worker: workerSrv},
 			Links:         linkProvider{worker: workerSrv, log: log},
+			Sessions:      sessionMgr,
 			Hasher:        hasher,
 			Tokens:        tokens,
 			Keys:          keys,
