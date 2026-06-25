@@ -287,10 +287,11 @@ worker section) and **wired into `steam_client.py`** (`resolve_match_id` /
 **Steps 8–9 (worker spectate path) are implemented in the worker** — the GUI spectate automation
 (`dota_client.py`), GUI-Steam bring-up (`steam_gui.py`), and the FFmpeg encoder + `StreamStarted`
 (`ffmpeg.py`, `agent.py`) — gated behind `WORKER_DOTA_BRINGUP=1` pending the live container stack
-(step 11). Their **control-plane counterpart** remains — the session lifecycle that drives them: the
-four `/api/sessions` handlers are still 501 stubs and the session state machine
-(`internal/sessions/state.go`, complete) is not yet wired to the HTTP handlers, worker
-`StreamStarted`/`StatusUpdate`/`ErrorEvent` events, or WS push. Steps 11–12 (deployment) remain and
+(step 11). Their **control-plane counterpart is wired** too: the four `/api/sessions` handlers drive
+`internal/sessions` (a `Manager` over the `state.go` machine) which sends StartSpectate/StopSpectate
+to the worker, reacts to its `StreamStarted`/`StatusUpdate IDLE`/`ErrorEvent`/`MatchIdResolved`/
+session `SteamGuardRequired` events, persists rows (`SessionStore`), and pushes `session_state`/
+`stream_ready`/`error`/`steam_guard` over WS. Steps 11–12 (deployment) remain and
 are greenfield (no `docker-compose.yml`, Dockerfiles, or `nginx.conf` yet). Known-risks
 have been validated live on the server (see [docs/validation-results.md](docs/validation-results.md)):
 V1 headless Xorg/NVIDIA, V2 Dota install, V3 match-ID, V6 NVENC/SRT, and **V4 headless GUI-Steam
