@@ -86,6 +86,6 @@ GUI client does the GC handshake itself; GC automation was rejected — see V5 /
 | `steam_client.py` | Warm python-steam session, refresh-token acquisition (QR/credentials handshake) + token CM login, interactive Steam Guard, `derive_status` (friends), rich-presence `WatchableGameID` match-ID resolution (`resolve_match_id` / `extract_watchable_match_id`), `persona_name` (cached, for GUI row matching) |
 | `steam_gui.py` | GUI Steam client bring-up — silent auto-login (`dbus-run-session … steam`), wait for this run's CM logon before Dota launches; pure `is_logged_on` connection-log parser |
 | `dota_client.py` | GUI Dota automation — in-process uinput devices (evdev), launch (sniper wrapper) + `wait_for_dota_window`, OCR-gated spectate via friends-panel right-click→WATCH FRIEND LIVE/GAME → player view (no camera-follow); pure decision logic (`classify_state`, `find_text_box`, …) split out for tests |
-| `ffmpeg.py` | FFmpeg subprocess management (stub) |
+| `ffmpeg.py` | FFmpeg encoder lifecycle — `x11grab :99 → hevc_nvenc → SRT (publish:live/match) → mediamtx`; pure `build_ffmpeg_command` / `build_srt_url`, `start`/`stop`/`is_running` |
 | `xorg/xorg.conf` | Headless NVIDIA display config (fill in BusID) |
 | `gen/` | Generated protobuf Python code — do not edit |

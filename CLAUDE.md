@@ -284,11 +284,14 @@ Steps 1–6 are complete (proto, migrations, control-plane + worker skeletons, a
 step 7 is complete — match-ID resolution is **validated** (via rich presence, not the GC; see
 worker section) and **wired into `steam_client.py`** (`resolve_match_id` /
 `extract_watchable_match_id`) + `agent.py` (`MatchIdResolved`). Step 10 (frontend) is complete.
-Steps 8–9 (worker spectate path) remain, as does their **control-plane counterpart** — the session
-lifecycle that drives them: the four `/api/sessions` handlers are still 501 stubs and the session
-state machine (`internal/sessions/state.go`, complete) is not yet wired to the HTTP handlers,
-worker `StreamStarted`/`StatusUpdate`/`ErrorEvent` events, or WS push. Steps 11–12 (deployment)
-remain and are greenfield (no `docker-compose.yml`, Dockerfiles, or `nginx.conf` yet). Known-risks
+**Steps 8–9 (worker spectate path) are implemented in the worker** — the GUI spectate automation
+(`dota_client.py`), GUI-Steam bring-up (`steam_gui.py`), and the FFmpeg encoder + `StreamStarted`
+(`ffmpeg.py`, `agent.py`) — gated behind `WORKER_DOTA_BRINGUP=1` pending the live container stack
+(step 11). Their **control-plane counterpart** remains — the session lifecycle that drives them: the
+four `/api/sessions` handlers are still 501 stubs and the session state machine
+(`internal/sessions/state.go`, complete) is not yet wired to the HTTP handlers, worker
+`StreamStarted`/`StatusUpdate`/`ErrorEvent` events, or WS push. Steps 11–12 (deployment) remain and
+are greenfield (no `docker-compose.yml`, Dockerfiles, or `nginx.conf` yet). Known-risks
 have been validated live on the server (see [docs/validation-results.md](docs/validation-results.md)):
 V1 headless Xorg/NVIDIA, V2 Dota install, V3 match-ID, V6 NVENC/SRT, and **V4 headless GUI-Steam
 QR login + silent auto-login** all pass; **V5** has Dota launch + render + Steam auth + the **input
