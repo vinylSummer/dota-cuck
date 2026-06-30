@@ -9,13 +9,12 @@
 #   docker build -f scripts/validation/Dockerfile.steam -t dota-steam .
 # (override the base with --build-arg BASE_IMAGE=...).
 #
-# ⚠ LIVE VALIDATION REQUIRED on the GPU host. The uinput device-enumeration
-# ordering — the devices must exist before Xorg binds them via libinput — is
-# proven in the harness via standalone daemons + a one-shot Xorg restart
-# (v5_spectate.sh setup_uinput). Wiring that to the worker's in-process
-# DotaClient devices (worker owns them in setup(); Xorg must re-enumerate) must
-# be validated on the server before this image streams end to end. See
-# docs/validation-results.md and docs/deployment.md.
+# uinput device ordering: the input daemons (uinput_daemon, vnc_input_daemon)
+# create the devices, a one-shot (input-bind.sh) ensures their /dev/input nodes +
+# retags the udev db (the proven setup_uinput logic), and Xorg is GATED on that
+# (run-xorg.sh waits for /tmp/uinput-ready) so its startup enumeration binds them
+# via libinput with no restart. DotaClient drives the daemons' FIFOs. Validate
+# live on the GPU host (compare to the harness dota-v5 reference).
 ARG BASE_IMAGE=dota-steam
 FROM ${BASE_IMAGE}
 
@@ -34,8 +33,10 @@ RUN cd /opt/worker && uv sync --frozen --no-dev \
 # Production process map: the validated desktop services (udev/dbus/Xorg/Xfce +
 # optional VNC for the one-time Steam login) plus the worker program.
 COPY worker/deploy/supervisord.conf /etc/supervisord.worker.conf
-COPY worker/deploy/run-worker.sh /usr/local/bin/run-worker.sh
-RUN chmod +x /usr/local/bin/run-worker.sh
+COPY worker/deploy/run-worker.sh worker/deploy/run-xorg.sh worker/deploy/input-bind.sh \
+     /usr/local/bin/
+RUN chmod +x /usr/local/bin/run-worker.sh /usr/local/bin/run-xorg.sh \
+             /usr/local/bin/input-bind.sh
 
 # ENABLE_VNC=true once, over an SSH tunnel, for the one-time interactive Steam
 # login (V4); thereafter the persisted token silent-auto-logins with it false.

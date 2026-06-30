@@ -400,7 +400,7 @@ def main() -> None:
     dota = gui = ffmpeg = None
     if os.environ.get("WORKER_DOTA_BRINGUP") == "1":
         dota = DotaClient()
-        dota.setup()  # create the uinput devices before Dota launches (Source 2 enumerates at start)
+        dota.setup()  # verify the input daemons' FIFOs are present (daemons own the devices)
         gui = SteamGui()
         ffmpeg = FFmpegPipeline()
         log.info("Dota bring-up enabled (GUI Steam + spectate automation + FFmpeg)")

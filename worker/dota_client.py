@@ -12,14 +12,15 @@ is NO in-session camera-follow step.
 This is the worker port of the validated harness automation
 (scripts/validation/desktop/gui_spectate.py). The pure decision logic (modal classification, OCR
 box parsing, fuzzy matching) is kept at module level and unit-tested in tests/test_dota_decisions.py;
-the I/O lives on ``DotaClient``, which owns the uinput devices in-process (python-evdev) instead of
-writing to the harness's FIFO+daemon bridge.
+the I/O lives on ``DotaClient``, which drives input through the same proven daemons the harness uses
+(it writes ``Pointer …`` lines to vnc_input_daemon's FIFO and console/RAW keys to uinput_daemon's
+FIFO) rather than owning the kernel devices itself.
 
-Device-ownership lifecycle (Source 2 enumerates input devices at startup and, with no udev daemon in
-the container, does NOT see hotplugged devices): the keyboard + absolute-mouse uinput devices MUST
-exist before Dota launches, and Xorg must re-enumerate them. So the intended order is
-``setup()`` (create devices) -> Xorg re-enumerate (container entrypoint) -> ``launch_dota()`` ->
-``spectate(name)``; the long-lived DotaClient owns the devices for the whole worker process.
+Device ownership stays with the standalone daemons because the devices must exist + be retagged
+before Xorg's startup input enumeration binds them via libinput — an ordering a process that starts
+after Xorg can't satisfy. The container (worker/deploy) creates the devices and gates Xorg on them;
+this client just needs the FIFOs present. Order: daemons create devices -> Xorg binds -> GUI Steam
+login -> ``launch_dota()`` -> ``spectate(name)``.
 """
 
 from __future__ import annotations
@@ -33,7 +34,13 @@ from difflib import SequenceMatcher
 
 log = logging.getLogger("worker.dota")
 
-ABS_MAX = 32767  # absolute-pointer range, matches the validated dota-vnc-mouse device
+# The worker drives input through the same proven standalone daemons the harness uses (created
+# before the Xorg re-enumeration so libinput binds them): the mouse via vnc_input_daemon's FIFO
+# (write "Pointer <cnt> <x> <y> <mask>"), the keyboard/console via uinput_daemon's FIFO. The worker
+# does NOT own the uinput devices — that ordering can't be satisfied from a process that starts
+# after Xorg. See worker/deploy + scripts/validation/v5_spectate.sh (setup_uinput).
+VNC_FIFO = os.environ.get("VNC_FIFO", "/tmp/vnc_input.fifo")
+UINPUT_FIFO = os.environ.get("UINPUT_FIFO", "/tmp/dota_uinput.fifo")
 
 
 # ============================ pure decision logic (unit-tested) ============================
@@ -240,9 +247,9 @@ class DotaConfig:
 
 
 class DotaClient:
-    """Owns the in-process uinput devices and drives the OCR-gated spectate path.
+    """Drives the OCR-gated spectate path through the proven uinput daemons (via FIFOs).
 
-    Pure decision logic is the module-level functions above; this class is the I/O seam (devices,
+    Pure decision logic is the module-level functions above; this class is the I/O seam (FIFO input,
     screenshots/OCR via subprocess, the step machine). It is NOT unit-tested — it's validated live
     in the harness (gui_spectate.py); tests cover the pure logic it delegates to.
     """
@@ -251,72 +258,20 @@ class DotaClient:
         self.cfg = config or DotaConfig()
         self.anchors = {**DEFAULT_ANCHORS, **(anchors or {})}
         self._env = {**os.environ, "DISPLAY": self.cfg.display}
-        self._mouse = None  # type: ignore[assignment]
-        self._kbd = None  # type: ignore[assignment]
-        self._e = None  # evdev.ecodes, populated by setup()
-        self._keymap: dict = {}
-        self._last_mask = 0
+        self._counter = 0  # monotonic Pointer sequence id the vnc bridge expects
         self._pos = [self.cfg.screen_w // 2, self.cfg.screen_h // 2]
 
-    # --- device ownership (mirrors vnc_input_daemon + uinput_daemon, in-process) ---
-
     def setup(self) -> None:
-        """Create the absolute-mouse + keyboard uinput devices. MUST be called before Dota launches
-        so Source 2 enumerates them (no udev hotplug in the container). Idempotent."""
-        if self._mouse is not None:
-            return
-        from evdev import AbsInfo, UInput
-        from evdev import ecodes as e
-
-        self._e = e
-        self._mouse = UInput(
-            {
-                e.EV_KEY: [e.BTN_LEFT, e.BTN_RIGHT, e.BTN_MIDDLE],
-                e.EV_ABS: [
-                    (e.ABS_X, AbsInfo(0, 0, ABS_MAX, 0, 0, 0)),
-                    (e.ABS_Y, AbsInfo(0, 0, ABS_MAX, 0, 0, 0)),
-                ],
-                e.EV_REL: [e.REL_WHEEL],
-            },
-            name="dota-vnc-mouse",
-            input_props=[e.INPUT_PROP_POINTER],
-        )
-        self._keymap = self._build_keymap(e)
-        caps = {
-            e.EV_KEY: sorted(
-                {
-                    e.KEY_GRAVE, e.KEY_ENTER, e.KEY_LEFTSHIFT, e.KEY_ESC,
-                    e.KEY_SPACE, e.KEY_TAB, e.KEY_BACKSPACE,
-                }
-                | {getattr(e, f"KEY_F{n}") for n in range(1, 13)}
-                | {kc for kc, _ in self._keymap.values()}
-            )
-        }
-        self._kbd = UInput(caps, name="dota-spectate-uinput")
-        time.sleep(0.6)  # let the devices register before Dota/libinput enumerates them
-        log.info("dota input devices created (dota-vnc-mouse, dota-spectate-uinput)")
-
-    @staticmethod
-    def _build_keymap(e) -> dict:
-        km: dict = {}
-        for c in "abcdefghijklmnopqrstuvwxyz":
-            km[c] = (getattr(e, f"KEY_{c.upper()}"), False)
-        for d in "0123456789":
-            km[d] = (getattr(e, f"KEY_{d}"), False)
-        km[" "] = (e.KEY_SPACE, False)
-        km["_"] = (e.KEY_MINUS, True)
-        km["-"] = (e.KEY_MINUS, False)
-        km["."] = (e.KEY_DOT, False)
-        return km
+        """Verify the input FIFOs the daemons own are present. The devices themselves are created by
+        the standalone uinput/vnc daemons BEFORE the Xorg re-enumeration (see worker/deploy), since a
+        process starting after Xorg can't get its devices bound. Best-effort: warns, never raises."""
+        for fifo in (VNC_FIFO, UINPUT_FIFO):
+            if not os.path.exists(fifo):
+                log.warning("input FIFO %s missing — is the input daemon running? "
+                            "mouse/keyboard will not reach Dota", fifo)
 
     def close(self) -> None:
-        for dev in (self._mouse, self._kbd):
-            try:
-                if dev is not None:
-                    dev.close()
-            except Exception:  # noqa: BLE001 — best-effort teardown
-                pass
-        self._mouse = self._kbd = None
+        """No-op: the daemons own the devices/FIFOs, not this client."""
 
     # --- launch ---
 
@@ -324,7 +279,7 @@ class DotaClient:
         """Launch Dota directly through the install's own sniper wrapper (run-in-sniper ->
         _v2-entry-point), with the GUI Steam client running only for auth. Ported from
         v5_spectate.sh launch_dota; the worker runs as the `worker` user inside the container, so no
-        docker exec wrapping. Devices must already exist (call setup() first)."""
+        docker exec wrapping. The input daemons must already be running (devices bound to libinput)."""
         cfg = self.cfg
         cfgdir = os.path.join(cfg.dota_dir, "game", "dota", "cfg")
         os.makedirs(cfgdir, exist_ok=True)
@@ -419,25 +374,21 @@ class DotaClient:
         tsv = self._convert_tesseract(img, reg, psm, tsv=True, invert=invert, scale=scale)
         return parse_tsv(tsv, region_x=rx, region_y=ry, scale=scale)
 
-    # --- mouse (in-process port of vnc_input_daemon Bridge.pointer + gui_spectate dense motion) ---
+    # --- mouse (writes to vnc_input_daemon's FIFO; it owns dota-vnc-mouse) ---
+
+    @staticmethod
+    def _fifo_write(path: str, line: str) -> None:
+        # The daemon reopens the FIFO per writer, so open/write/close per line is the contract.
+        with open(path, "w") as f:
+            f.write(line + "\n")
 
     def _pointer(self, x: int, y: int, mask: int) -> None:
-        e = self._e
+        # Absolute coords + a button mask (bit0 left, bit2 right, bit3/4 wheel up/down). The daemon
+        # scales to ABS range and computes button/wheel edges from its own last mask.
+        self._counter += 1
         x = max(0, min(self.cfg.screen_w - 1, x))
         y = max(0, min(self.cfg.screen_h - 1, y))
-        ax = max(0, min(ABS_MAX, round(x * ABS_MAX / max(1, self.cfg.screen_w - 1))))
-        ay = max(0, min(ABS_MAX, round(y * ABS_MAX / max(1, self.cfg.screen_h - 1))))
-        self._mouse.write(e.EV_ABS, e.ABS_X, ax)
-        self._mouse.write(e.EV_ABS, e.ABS_Y, ay)
-        changed = mask ^ self._last_mask
-        for bit, btn in ((0, e.BTN_LEFT), (1, e.BTN_MIDDLE), (2, e.BTN_RIGHT)):
-            if changed & (1 << bit):
-                self._mouse.write(e.EV_KEY, btn, 1 if mask & (1 << bit) else 0)
-        for bit, delta in ((3, 1), (4, -1)):  # wheel up / down on press edge
-            if (changed & (1 << bit)) and (mask & (1 << bit)):
-                self._mouse.write(e.EV_REL, e.REL_WHEEL, delta)
-        self._last_mask = mask
-        self._mouse.syn()
+        self._fifo_write(VNC_FIFO, f"Pointer {self._counter} {x} {y} {mask}")
 
     def _move(self, x: int, y: int) -> None:
         # VALIDATED LIVE (2026-06-24): Panorama only registers hover / opens a context menu if the
@@ -479,26 +430,19 @@ class DotaClient:
             time.sleep(0.05)
         time.sleep(0.6)
 
-    # --- keyboard (in-process port of uinput_daemon) ---
-
-    def _tap(self, keycode, shift: bool = False) -> None:
-        e = self._e
-        if shift:
-            self._kbd.write(e.EV_KEY, e.KEY_LEFTSHIFT, 1)
-            self._kbd.syn()
-        self._kbd.write(e.EV_KEY, keycode, 1)
-        self._kbd.syn()
-        self._kbd.write(e.EV_KEY, keycode, 0)
-        self._kbd.syn()
-        if shift:
-            self._kbd.write(e.EV_KEY, e.KEY_LEFTSHIFT, 0)
-            self._kbd.syn()
-        time.sleep(0.03)
+    # --- keyboard / console (writes to uinput_daemon's FIFO; it owns dota-spectate-uinput) ---
 
     def _tap_esc(self) -> None:
+        # "RAW <KEY_NAME>" taps the evdev key directly (uinput_daemon contract).
         self._focus_dota()
-        self._tap(self._e.KEY_ESC)
-        time.sleep(0.5)
+        self._fifo_write(UINPUT_FIFO, "RAW KEY_ESC")
+        time.sleep(2.0)  # daemon paces raw taps; let the dismiss register
+
+    def _console(self, cmd: str) -> None:
+        # A plain line opens the engine console, types, ENTER, closes (uinput_daemon contract).
+        self._focus_dota()
+        self._fifo_write(UINPUT_FIFO, cmd)
+        time.sleep(4.0)
 
     def _focus_dota(self) -> None:
         subprocess.run(
